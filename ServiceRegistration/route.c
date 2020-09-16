@@ -298,8 +298,11 @@ interface_create_(const char *name, int ifindex, const char *file, int line)
 
         ret->index = ifindex;
         ret->inactive = true;
-        // Interfaces are ineligible for routing until explicitly identified as eligible.
-        ret->ineligible = true;
+        if (!strcmp(name, "lo") || !strcmp(name, "wpan0")) {
+            ret->ineligible = true;
+        } else {
+            ret->ineligible = false;
+        }
     }
     return ret;
 }
@@ -668,6 +671,9 @@ interface_beacon(void *context)
         interface->sent_first_beacon = true;
         interface->last_beacon = ioloop_timenow();;
 #ifndef RA_TESTER
+    } else {
+        INFO("Didn't send: %s %s", partition_can_provide_routing ? "canpr" : "can'tpr",
+             interface->advertise_ipv6_prefix ? "adv6" : "!adv6");
     }
 #endif
     interface_beacon_schedule(interface, icmp_listener.unsolicited_interval);
@@ -2227,6 +2233,12 @@ interface_active_state_evaluate(interface_t *interface, bool active_known, bool 
 {
     if (active_known && !active) {
         if (!interface->inactive) {
+            // Set up the thread-local prefix
+            interface_prefix_evaluate(interface);
+
+            // We need to reevaluate routing policy on the new primary interface now, because
+            // there may be no new event there to trigger one.
+            routing_policy_evaluate(interface, true);
 
             // Clean the slate.
             icmp_interface_subscribe(interface, false);
@@ -2285,7 +2297,7 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
     interface_t *interface;
     bool is_thread_interface = false;
 
-#ifndef OPEN_SOURCE
+#ifndef POSIX_BUILD
     interface = find_interface(name, -1);
 #else
     interface = find_interface(name, if_nametoindex(name));
@@ -2421,7 +2433,7 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
 #endif
     }
 #ifdef LINUX
-    interface_active_state_evaluate(interface, false, false);
+    interface_active_state_evaluate(interface, true, true);
 #endif
 }
 
@@ -3009,6 +3021,7 @@ thread_network_startup(void)
 {
     INFO("thread_network_startup: Thread network started.");
 
+//    ioloop_network_watcher_start(network_watch_event);
 #if defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
     get_thread_interface_list();
 #endif

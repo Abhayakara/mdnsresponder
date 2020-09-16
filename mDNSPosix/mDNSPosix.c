@@ -218,7 +218,7 @@ mDNSlocal void TCPReadCallback(int fd, void *context)
 {
     TCPSocket *sock = context;
     (void)fd;
-    
+
     if (sock->flags & kTCPSocketFlags_UseTLS)
     {
         // implement
@@ -255,7 +255,7 @@ mDNSlocal void tcpConnectCallback(int fd, void *context)
                         sock->events.fd, result, strerror(result));
             }
             else
-            { 
+            {
                 LogMsg("ERROR: TCPConnectCallback - connect failed: socket %d: Error %d (%s)",
                        sock->events.fd, result, strerror(result));
             }
@@ -383,14 +383,14 @@ mDNSexport TCPSocket *mDNSPlatformTCPSocket(TCPSocketFlags flags, mDNSAddr_Type 
 {
     TCPSocket *sock;
     int len = sizeof (TCPSocket);
-    
+
     (void)useBackgroundTrafficClass;
 
     if (hostname)
     {
         len += sizeof (domainname);
     }
-    sock = malloc(len); 
+    sock = malloc(len);
 
     if (sock == NULL)
     {
@@ -398,14 +398,14 @@ mDNSexport TCPSocket *mDNSPlatformTCPSocket(TCPSocketFlags flags, mDNSAddr_Type 
         return NULL;
     }
     memset(sock, 0, sizeof *sock);
-    
+
     if (hostname)
     {
         sock->hostname = (domainname *)(sock + 1);
         LogMsg("mDNSPlatformTCPSocket: hostname %##s", hostname->c);
         AssignDomainName(sock->hostname, hostname);
     }
-    
+
     sock->events.fd = -1;
     if (!mDNSPosixTCPSocketSetup(&sock->events.fd, addrType, port, &sock->port))
     {
@@ -456,7 +456,7 @@ mDNSlocal void tcpListenCallback(int fd, void *context)
 {
     TCPListener *listener = context;
     TCPSocket *sock;
-    
+
     sock = mDNSPosixDoTCPListenCallback(fd, listener->addressType, listener->socketFlags,
                                  listener->callback, listener->context);
     if (sock != NULL)
@@ -480,7 +480,7 @@ mDNSexport TCPListener *mDNSPlatformTCPListen(mDNSAddr_Type addrType, mDNSIPPort
         }
         return mDNSNULL;
     }
-    
+
     // Allocate a listener structure
     ret = (TCPListener *) mDNSPlatformMemAllocateClear(sizeof *ret);
     if (ret == NULL)
@@ -577,7 +577,7 @@ mDNSexport mStatus mDNSPlatformTCPConnect(TCPSocket *sock, const mDNSAddr *dst, 
 #else
             (void)iface;
 #endif // IPV6_BOUND_IF
-        }           
+        }
 #endif // SO_BINDTODEVICE
     }
 
@@ -614,12 +614,12 @@ mDNSexport mStatus mDNSPlatformTCPConnect(TCPSocket *sock, const mDNSAddr *dst, 
                     sock->events.fd, errno, strerror(errno));
         }
         else
-        { 
+        {
             LogMsg("ERROR: mDNSPlatformTCPConnect - connect failed: socket %d: Error %d (%s) length %d",
                    sock->events.fd, errno, strerror(errno), len);
         }
         return mStatus_ConnFailed;
-    }       
+    }
 
     LogMsg("NOTE: mDNSPlatformTCPConnect completed synchronously");
     return mStatus_NoError;
@@ -640,7 +640,7 @@ mDNSexport void mDNSPlatformTCPCloseConnection(TCPSocket *sock)
 mDNSexport long mDNSPlatformReadTCP(TCPSocket *sock, void *buf, unsigned long buflen, mDNSBool * closed)
 {
     ssize_t nread;
-    
+
     *closed = mDNSfalse;
     if (sock->flags & kTCPSocketFlags_UseTLS)
     {
@@ -1400,7 +1400,7 @@ mDNSlocal mStatus OpenIfNotifySocket(int *pFD)
     /* Subscribe the socket to Link & IP addr notifications. */
     mDNSPlatformMemZero(&snl, sizeof snl);
     snl.nl_family = AF_NETLINK;
-    snl.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR;
+    snl.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR;
     ret = bind(sock, (struct sockaddr *) &snl, sizeof snl);
     if (0 == ret)
         *pFD = sock;
