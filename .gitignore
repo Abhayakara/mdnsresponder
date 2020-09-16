@@ -1,0 +1,18 @@
+mDNSMacOSX/*.xcodeproj/project.xcworkspace
+mDNSMacOSX/*.xcodeproj/xcuserdata
+.svn
+.DS_Store
+build
+objects
+*~.m
+*~.c
+*~.h
+*~
+# Windows
+.vs
+*.aps
+*.vcxproj.user
+Win32
+x64
+ARM64
+.depfile*
