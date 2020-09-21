@@ -24,7 +24,13 @@
 #ifndef LINUX
 #include <netinet/in_var.h>
 #include <net/if_dl.h>
-#endif
+#include <asm/types.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#else
+#include <net/route.h>
+#include <net/if.h>
+#endif // LINUX
 #include <sys/ioctl.h>
 #include <errno.h>
 #include <ifaddrs.h>
@@ -358,6 +364,7 @@ get_num_fds(void)
     return num;
 }
 #endif // DEBUG_VERBOSE
+
 
 // Local Variables:
 // mode: C
