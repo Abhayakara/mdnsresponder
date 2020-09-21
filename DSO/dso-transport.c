@@ -586,10 +586,10 @@ void dso_read_callback(TCPSocket *sock, void *context, mDNSBool connection_estab
         // We just finished reading the complete length of a DNS-over-TCP message.
         if (transport->need_length) {
             // Get the number of bytes in this DNS message
-            transport->bytes_needed = (((int)transport->inbuf[0]) << 8) | transport->inbuf[1];
+            size_t bytes_needed = (((size_t)transport->inbuf[0]) << 8) | transport->inbuf[1];
 
             // Under no circumstances can length be zero.
-            if (transport->bytes_needed == 0) {
+            if (bytes_needed == 0) {
                 LogMsg("dso_read_callback: %s sent zero-length message.", dso->remote_name);
                 dso_drop(dso);
                 goto out;
@@ -598,14 +598,15 @@ void dso_read_callback(TCPSocket *sock, void *context, mDNSBool connection_estab
             // The input buffer size is AbsoluteMaxDNSMessageData, which is around 9000 bytes on
             // big platforms and around 1500 bytes on smaller ones.   If the remote end has sent
             // something larger than that, it's an error from which we can't recover.
-            if (transport->bytes_needed > transport->inbuf_size - 2) {
-                LogMsg("dso_read_callback: fatal: Proxy at %s sent a too-long (%ld bytes) message",
-                       dso->remote_name, (long)transport->bytes_needed);
+            if (bytes_needed > transport->inbuf_size - 2) {
+                LogMsg("dso_read_callback: fatal: Proxy at %s sent a too-long (%zd bytes) message",
+                       dso->remote_name, bytes_needed);
                 dso_drop(dso);
                 goto out;
             }
 
-            transport->message_length = transport->bytes_needed;
+            transport->message_length = bytes_needed;
+            transport->bytes_needed = bytes_needed;
             transport->inbufp = transport->inbuf + 2;
             transport->need_length = false;
 

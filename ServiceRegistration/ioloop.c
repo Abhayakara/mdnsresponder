@@ -59,6 +59,7 @@ int64_t ioloop_now;
 #ifdef USE_KQUEUE
 int kq;
 #endif
+static void subproc_finalize(subproc_t *subproc);
 
 int
 getipaddr(addr_t *addr, const char *p)
@@ -286,16 +287,6 @@ ioloop_cancel_wake_event(wakeup_t *wakeup)
     wakeup->wakeup_time = 0;
 }
 
-static void
-subproc_free(subproc_t *subproc)
-{
-    int i;
-    for (i = 0; i < subproc->argc; i++) {
-        free(subproc->argv[i]);
-    }
-    free(subproc);
-}
-
 bool
 ioloop_init(void)
 {
@@ -444,9 +435,9 @@ start_over:
                 if (!WIFSTOPPED(status)) {
                     *sp = subproc->next;
                 }
-                subproc->callback(subproc, status, NULL);
+                subproc->callback(subproc->context, status, NULL);
                 if (!WIFSTOPPED(status)) {
-                    subproc_free(subproc);
+                    RELEASE_HERE(subproc, subproc_finalize);
                     break;
                 }
             }
@@ -1410,7 +1401,7 @@ ioloop_subproc(const char *exepath, char **argv, int argc, subproc_callback_t ca
         return NULL;
     }
 
-    subproc = calloc(1, sizeof *subproc);
+    subproc = calloc(1, sizeof(*subproc));
     if (subproc == NULL) {
         callback(NULL, 0, "out of memory");
         return NULL;
@@ -1472,6 +1463,7 @@ ioloop_subproc(const char *exepath, char **argv, int argc, subproc_callback_t ca
     subproc->context = context;
     subproc->next = subprocesses;
     subprocesses = subproc;
+    RETAIN_HERE(subproc);
 
     // Now that we have a viable subprocess, add the reader callback.
     if (output_callback != NULL && subproc->output_fd != NULL) {

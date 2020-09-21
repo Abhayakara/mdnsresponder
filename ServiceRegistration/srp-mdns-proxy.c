@@ -866,15 +866,17 @@ register_instance(adv_instance_t *instance)
     // the server isn't running; in the second two cases, we can always try again later.
     if (err != kDNSServiceErr_NoError) {
         // If we can, always send status to the client.
-        if (instance->update->client == NULL &&
-            (err == kDNSServiceErr_ServiceNotRunning || err == kDNSServiceErr_DefunctConnection))
-        {
-            INFO("DNSServiceRegister failed: " PUB_S_SRP ,
-                 err == kDNSServiceErr_ServiceNotRunning ? "not running" : "defunct");
-            service_disconnected(instance->host);
-        } else {
-            INFO("DNSServiceRegister failed: %d", err);
-            update_failed(instance->update, dns_rcode_servfail, true);
+        if (instance->update != NULL) {
+            if (instance->update->client == NULL &&
+                (err == kDNSServiceErr_ServiceNotRunning || err == kDNSServiceErr_DefunctConnection))
+            {
+                INFO("DNSServiceRegister failed: " PUB_S_SRP ,
+                     err == kDNSServiceErr_ServiceNotRunning ? "not running" : "defunct");
+                service_disconnected(instance->host);
+            } else {
+                INFO("DNSServiceRegister failed: %d", err);
+                update_failed(instance->update, dns_rcode_servfail, true);
+            }
         }
         return false;
     }
@@ -884,7 +886,9 @@ register_instance(adv_instance_t *instance)
         DNSServiceRefDeallocate(sdref);
         return false;
     }
-    instance->update->num_instances_started++;
+    if (instance->update != NULL) {
+        instance->update->num_instances_started++;
+    }
     return true;
 }
 

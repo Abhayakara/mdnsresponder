@@ -92,7 +92,7 @@ dns_label_parse(const uint8_t *buf, unsigned mlen, unsigned *NONNULL offp)
         return NULL;
     }
 
-    rv = calloc(1, llen + 1 - DNS_MAX_LABEL_SIZE + sizeof(*rv));
+    rv = calloc(1, (sizeof(*rv) - DNS_MAX_LABEL_SIZE) + llen + 1);
     if (rv == NULL) {
         DEBUG("memory allocation for %u byte label (%.*s) failed.\n",
               *offp + llen + 1, *offp + llen + 1, &buf[*offp + 1]);
@@ -148,7 +148,7 @@ dns_name_parse_in(dns_label_t *NONNULL *NULLABLE ret, const uint8_t *buf, unsign
                   pointer, buf[pointer]);
             return false;
         }
-        return dns_name_parse(ret, buf, len, &pointer, pointer);
+        return dns_name_parse_in(ret, buf, len, &pointer, pointer);
     }
     // We don't support binary labels, which are historical, and at this time there are no other valid
     // DNS label types.
@@ -174,7 +174,7 @@ bool
 dns_name_parse(dns_label_t *NONNULL *NULLABLE ret, const uint8_t *buf,
                unsigned len, unsigned *NONNULL offp, unsigned base)
 {
-    dns_label_t *rv, *next;
+    dns_label_t *rv = NULL, *next;
 
     if (!dns_name_parse_in(&rv, buf, len, offp, base)) {
         for (; rv != NULL; rv = next) {
@@ -246,12 +246,13 @@ dns_rrdata_dump(dns_rr_t *rr)
 #define ADVANCE(result, start, remaining) \
     output_len = strlen(start);           \
     result = start + output_len;          \
-    avail = remaining - output_len
+    avail = (remaining) - output_len
 #define DEPCHAR(ch)     \
     do {                     \
-        if (avail) {         \
+        if (avail > 1) {     \
             *obp++ = (ch);   \
             *obp = 0;        \
+            --avail;         \
         }                    \
     } while (0)
 
@@ -595,6 +596,7 @@ bool
 dns_wire_parse(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsigned len)
 {
     unsigned offset = 0;
+    unsigned data_len = len - DNS_HEADER_SIZE;
     dns_message_t *rv = calloc(1, sizeof(*rv));
     int i;
 
@@ -620,7 +622,7 @@ dns_wire_parse(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsign
     }                                                                               \
                                                                                     \
     for (i = 0; i < rv->count; i++) {                                               \
-        if (!dns_rr_parse(&rv->sets[i], message->data, len, &offset, rrdata_expected)) {    \
+        if (!dns_rr_parse(&rv->sets[i], message->data, data_len, &offset, rrdata_expected)) {    \
             dns_message_free(rv);                                                   \
             ERROR(name " %d RR parse failed.\n", i);                                \
             return false;                                                           \

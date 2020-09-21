@@ -16547,6 +16547,11 @@ typedef struct
 	char *						serviceName;	// Test service's instance name as a string. (malloced)
 	char *						serviceType;	// Test service's service type as a string. (malloced)
 	uint8_t *					recordName;		// FQDN of collider's record (same as test service's records). (malloced)
+	dispatch_source_t			sigSourceINT;	// SIGINT signal handler.
+	dispatch_source_t			sigSourceTERM;	// SIGTERM signal handler.
+	CFStringRef					exComputerName;	// Previous ComputerName.
+	CFStringRef					exLocalHostName;// Previous LocalHostName.
+	CFStringEncoding			exCompNameEnc;	// Previous ComputerName's encoding.
 	unsigned int				testCaseIndex;	// Index of the current test case.
 	uint32_t					ifIndex;		// Index of the interface that the collider is to operate on.
 	MDNSColliderProtocols		protocol;		// mDNS collider's IP protocol.
@@ -16570,12 +16575,17 @@ static void		_ProbeConflictTestColliderStopHandler( void *inContext, OSStatus in
 static OSStatus	_ProbeConflictTestStartNextTest( ProbeConflictTestContext *inContext );
 static OSStatus	_ProbeConflictTestStopCurrentTest( ProbeConflictTestContext *inContext, Boolean inRenamed );
 static void		_ProbeConflictTestFinalizeAndExit( ProbeConflictTestContext *inContext ) ATTRIBUTE_NORETURN;
+static void		_ProbeConflictTestRestoreSystemNames( ProbeConflictTestContext *inContext );
+static void		_ProbeConflictTestSignalHandler( void *inContext );
 
 static void	ProbeConflictTestCmd( void )
 {
 	OSStatus						err;
 	ProbeConflictTestContext *		context;
 	const char *					serviceName;
+	CFStringRef						computerName	= NULL;
+	CFStringRef						localHostName	= NULL;
+	char *							uniqueName;
 	char							tag[ 6 + 1 ];
 	
 	context = (ProbeConflictTestContext *) calloc( 1, sizeof( *context ) );
@@ -16618,13 +16628,62 @@ static void	ProbeConflictTestCmd( void )
 	context->results = CFArrayCreateMutable( NULL, kProbeConflictTestCaseCount, &kCFTypeArrayCallBacks );
 	require_action( context->results, exit, err = kNoMemoryErr );
 	
+	context->testStartTime = NanoTimeGetCurrent();
+	
+	// Set a unique ComputerName.
+	
+	computerName = SCDynamicStoreCopyComputerName( NULL, &context->exCompNameEnc );
+	err = map_scerror( computerName );
+	require_noerr( err, exit );
+	
+	_RandomStringExact( kLowerAlphaNumericCharSet, kLowerAlphaNumericCharSetSize, sizeof( tag ) - 1, tag );
+	ASPrintF( &uniqueName, "dnssdutil-pctest-computer-name-%s", tag );
+	require_action( uniqueName, exit, err = kNoMemoryErr );
+	
+	err = _SetComputerNameWithUTF8CString( uniqueName );
+	ForgetMem( &uniqueName );
+	require_noerr( err, exit );
+	context->exComputerName = computerName;
+	computerName = NULL;
+	
+	// Set a unique LocalHostName.
+	
+	localHostName = SCDynamicStoreCopyLocalHostName( NULL );
+	err = map_scerror( localHostName );
+	require_noerr( err, exit );
+	
+	ASPrintF( &uniqueName, "dnssdutil-pctest-local-hostname-%s", tag );
+	require_action( uniqueName, exit, err = kNoMemoryErr );
+	
+	err = _SetLocalHostNameWithUTF8CString( uniqueName );
+	ForgetMem( &uniqueName );
+	require_noerr( err, exit );
+	context->exLocalHostName = localHostName;
+	localHostName = NULL;
+	
+	// Set up SIGINT signal handler.
+	
+	signal( SIGINT, SIG_IGN );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), _ProbeConflictTestSignalHandler, context,
+		&context->sigSourceINT );
+	require_noerr( err, exit );
+	dispatch_resume( context->sigSourceINT );
+	
+	// Set up SIGTERM signal handler.
+	
+	signal( SIGTERM, SIG_IGN );
+	err = DispatchSignalSourceCreate( SIGTERM, dispatch_get_main_queue(), _ProbeConflictTestSignalHandler, context,
+		&context->sigSourceTERM );
+	require_noerr( err, exit );
+	dispatch_resume( context->sigSourceTERM );
+	
+	// Register the test service instance.
+	
 	serviceName = gProbeConflictTest_UseComputerName ? NULL : kProbeConflictTestService_DefaultName;
 	
-	ASPrintF( &context->serviceType, "_pctest-%s._udp",
-		_RandomStringExact( kLowerAlphaNumericCharSet, kLowerAlphaNumericCharSetSize, sizeof( tag ) - 1, tag ) );
+	ASPrintF( &context->serviceType, "_pctest-%s._udp", tag );
 	require_action( context->serviceType, exit, err = kNoMemoryErr );
 	
-	context->testStartTime = NanoTimeGetCurrent();
 	err = DNSServiceRegister( &context->registration, 0, context->ifIndex, serviceName, context->serviceType, "local.",
 		NULL, htons( kProbeConflictTestService_Port ), 0, NULL, _ProbeConflictTestRegisterCallback, context );
 	require_noerr( err, exit );
@@ -16635,7 +16694,10 @@ static void	ProbeConflictTestCmd( void )
 	dispatch_main();
 	
 exit:
-	exit( 1 );
+	CFReleaseNullSafe( computerName );
+	CFReleaseNullSafe( localHostName );
+	if( context ) _ProbeConflictTestRestoreSystemNames( context );
+	ErrQuit( 1, "error: %#m\n", err );
 }
 
 //===========================================================================================================================
@@ -16856,6 +16918,7 @@ static void	_ProbeConflictTestFinalizeAndExit( ProbeConflictTestContext *inConte
 	OSStatus				err;
 	CFPropertyListRef		plist;
 	NanoTime64				now;
+	int						exitCode;
 	char					startTime[ 32 ];
 	char					endTime[ 32 ];
 	
@@ -16886,10 +16949,51 @@ static void	_ProbeConflictTestFinalizeAndExit( ProbeConflictTestContext *inConte
 	CFRelease( plist );
 	require_noerr( err, exit );
 	
-	exit( inContext->testFailed ? 2 : 0 );
-	
 exit:
-	ErrQuit( 1, "error: %#m\n", err );
+	_ProbeConflictTestRestoreSystemNames( inContext );
+	if( err )
+	{
+		FPrintF( stderr, "error: %#m\n", err );
+		exitCode = 1;
+	}
+	else
+	{
+		exitCode = inContext->testFailed ? 2 : 0;
+	}
+	exit( exitCode );
+}
+
+//===========================================================================================================================
+//	_ProbeConflictTestRestoreSystemNames
+//===========================================================================================================================
+
+static void	_ProbeConflictTestRestoreSystemNames( ProbeConflictTestContext *inContext )
+{
+	OSStatus		err;
+	
+	if( inContext->exComputerName )
+	{
+		err = _SetComputerName( inContext->exComputerName, inContext->exCompNameEnc );
+		check_noerr( err );
+		ForgetCF( &inContext->exComputerName );
+	}
+	if( inContext->exLocalHostName )
+	{
+		err = _SetLocalHostName( inContext->exLocalHostName );
+		check_noerr( err );
+		ForgetCF( &inContext->exLocalHostName );
+	}
+}
+
+//===========================================================================================================================
+//	_ProbeConflictTestSignalHandler
+//===========================================================================================================================
+
+static void	_ProbeConflictTestSignalHandler( void *inContext )
+{
+	_ProbeConflictTestRestoreSystemNames( inContext );
+	FPrintF( stderr, "Probe conflict test got a SIGINT or SIGTERM signal, exiting...\n" );
+	exit( 1 );
 }
 
 #if( MDNSRESPONDER_PROJECT )

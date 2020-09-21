@@ -379,7 +379,7 @@ $(NSSINSTPATH)/$(NSSLIBFILE): $(BUILDDIR)/$(NSSLIBFILE)
 # Check the nsswitch.conf file.
 # If 'mdns' does not already appear on the "hosts:" line, then add it right before 'dns'
 	cp -f /etc/nsswitch.conf /etc/nsswitch.conf.pre-mdns
-	sed -e '/mdns/!s/^\(hosts:.*\)dns\(.*\)/\1mdns dns\2/' /etc/nsswitch.conf.pre-mdns > /etc/nsswitch.conf
+	sed -e '/\bmdns\b/!s/^\(hosts:.*\)dns\(.*\)/\1mdns dns\2/' /etc/nsswitch.conf.pre-mdns > /etc/nsswitch.conf
 
 #############################################################################
 

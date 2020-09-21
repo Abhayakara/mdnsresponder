@@ -39,6 +39,7 @@ static bool random_leases = false;
 static bool delete_registrations = false;
 static bool use_thread_services = false;
 static int num_clients = 1;
+static int bogusify_signatures = false;
 
 const uint64_t thread_enterprise_number = 52627;
 
@@ -241,6 +242,10 @@ srp_send_datagram(void *host_context, void *context, void *message, size_t messa
     iov.iov_base = message;
     iov.iov_len = message_length;
 
+    if (bogusify_signatures) {
+        ((uint8_t *)message)[message_length - 10] = ~(((uint8_t *)message)[message_length - 10]);
+    }
+
     err = validate_io_context(&io_context, context);
     if (err == kDNSServiceErr_NoError) {
         if (!ioloop_send_message(io_context->connection, message, &iov, 1)) {
@@ -377,7 +382,8 @@ usage(void)
 {
     fprintf(stderr,
             "srp-client [--lease-time <seconds>] [--client-count <client count>] [--server <address>%%<port>]\n"
-            "           [--random-leases] [--delete-registrations] [--use-thread-services] [--log-stderr]\n");
+            "           [--random-leases] [--delete-registrations] [--use-thread-services] [--log-stderr]\n"
+            "           [--bogusify-signatures]\n");
     exit(1);
 }
 
@@ -401,8 +407,8 @@ cti_service_list_callback(void *UNUSED context, cti_service_vec_t *services, cti
             srp_add_server_address(&cti_service->server[16], dns_rrtype_aaaa, cti_service->server, 16);
         }
     }
-    srp_finish_address_refresh();
-    srp_network_state_stable();
+    srp_finish_address_refresh(NULL);
+    srp_network_state_stable(NULL);
 }
 
 int
@@ -483,6 +489,8 @@ main(int argc, char **argv)
             use_thread_services = true;
         } else if (!strcmp(argv[i], "--log-stderr")) {
             OPENLOG(true);
+        } else if (!strcmp(argv[i], "--bogusify-signatures")) {
+            bogusify_signatures = true;
         } else {
             usage();
         }
@@ -544,7 +552,7 @@ main(int argc, char **argv)
     if (use_thread_services) {
         cti_get_service_list(&thread_service_context, NULL, cti_service_list_callback, NULL);
     } else {
-        srp_network_state_stable();
+        srp_network_state_stable(NULL);
     }
     ioloop();
 }

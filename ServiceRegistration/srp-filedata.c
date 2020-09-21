@@ -32,7 +32,7 @@
 #include "srp-crypto.h"
 #include "ioloop.h"
 
-static bool
+bool
 srp_load_file_data(void *host_context, const char *filename, uint8_t *buffer, uint16_t *length, uint16_t buffer_size)
 {
     off_t flen;
@@ -69,7 +69,7 @@ srp_load_file_data(void *host_context, const char *filename, uint8_t *buffer, ui
     return true;
 }
 
-static bool
+bool
 srp_store_file_data(void *host_context, const char *filename, uint8_t *buffer, uint16_t length)
 {
     ssize_t len;

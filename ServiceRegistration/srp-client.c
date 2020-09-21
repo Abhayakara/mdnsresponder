@@ -119,7 +119,7 @@ client_state_t *clients;
 client_state_t *current_client;
 
 // Forward references
-static int do_srp_update(client_state_t *client, bool definite);
+static int do_srp_update(client_state_t *client, bool definite, bool *did_something);
 static void udp_response(void *v_update_context, void *v_message, size_t message_length);
 static dns_wire_t *NULLABLE generate_srp_update(client_state_t *client, uint32_t update_lease_time,
                                                 uint32_t update_key_lease_time, size_t *NONNULL p_length,
@@ -348,14 +348,14 @@ srp_is_network_active(void)
 }
 
 int
-srp_network_state_stable(void)
+srp_network_state_stable(bool *did_something)
 {
     client_state_t *client;
     int status = kDNSServiceErr_NoError;
     if (network_state_changed && srp_is_network_active()) {
         network_state_changed = false;
         for (client = clients; client; client = client->next) {
-            int ret = do_srp_update(client, false);
+            int ret = do_srp_update(client, false, did_something);
             // In the normal case, there will only be one client, and therefore one return status.  For testing,
             // we allow more than one client; if we get an error here, we return it, but we still launch all the
             // updates.
@@ -428,7 +428,7 @@ srp_start_address_refresh(void)
 
 // Call this when the address refresh is done.   This invokes srp_network_state_stable().
 int
-srp_finish_address_refresh(void)
+srp_finish_address_refresh(bool *did_something)
 {
     service_addr_t *addr, *next;
     int i;
@@ -462,7 +462,7 @@ srp_finish_address_refresh(void)
         }
     }
     doing_refresh = false;
-    return srp_network_state_stable();
+    return srp_network_state_stable(did_something);
 }
 
 // Implementation of the API that the application will call to update the TXT record after having registered
@@ -800,9 +800,25 @@ udp_retransmit(void *v_update_context)
         }
     }
 
-    // If we've given up for now, schedule a next attempt; otherwise, schedule the next retransmission.
+    // If we've given up for now, either schedule a next attempt or notify the caller; otherwise, schedule the next retransmission.
     if (context->next_retransmission_time == 0) {
-        err = srp_set_wakeup(client->os_context, context->udp_context, context->next_attempt_time, udp_retransmit);
+        bool timeout_requested = false;
+        reg_state_t *registration;
+        for (registration = client->registrations; registration; registration = registration->next) {
+            if (registration->callback != NULL && registration->serial <= context->serial &&
+                !(registration->flags & kDNSServiceFlagsTimeout))
+            {
+                timeout_requested = true;
+            }
+        }
+        // If any of the callers requested a timeout, we treat it as if they all did, and call all the callbacks with the "timed out"
+        // error.
+        if (timeout_requested) {
+            do_callbacks(client, context->serial, kDNSServiceErr_Timeout, false);
+            err = kDNSServiceErr_NoError;
+        } else {
+            err = srp_set_wakeup(client->os_context, context->udp_context, context->next_attempt_time, udp_retransmit);
+        }
     } else {
         err = srp_set_wakeup(client->os_context, context->udp_context,
                              context->next_retransmission_time - 512 + srp_random16() % 1024, udp_retransmit);
@@ -819,7 +835,7 @@ renew_callback(void *v_update_context)
     update_context_t *context = v_update_context;
     client_state_t *client = context->client;
     INFO("renew callback");
-    do_srp_update(client, true);
+    do_srp_update(client, true, NULL);
 }
 
 // This function will, if hostname_rename_number is nonzero, create a hostname using the chosen hostname plus
@@ -872,18 +888,21 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
     const uint8_t *end = (const uint8_t *)v_message + message_length;
     bool resolve_name_conflict = false;
     char *conflict_hostname = NULL, *chosen_hostname;
-    uint32_t retry_time;
 
     INFO("Got a response for %p, rcode = %d", client, dns_rcode_get(message));
 
-    // Cancel the retransmit wakeup.
+    // Cancel the existing retransmit wakeup, since we definitely don't want to retransmit to the current
+    // server.
     err = srp_cancel_wakeup(client->os_context, context->udp_context);
     if (err != kDNSServiceErr_NoError) {
         INFO("udp_response: %d", err);
     }
-    // We want a different UDP source port for each transaction, so cancel the current UDP state.
-    srp_disconnect_udp(context->udp_context);
-    context->connected = false;
+
+    if (rcode == dns_rcode_noerror || rcode == dns_rcode_yxdomain) {
+        // We want a different UDP source port for each transaction, so cancel the current UDP state.
+        srp_disconnect_udp(context->udp_context);
+        context->connected = false;
+    }
 
     // When we are doing a remove, we don't actually care what the result is--if we get back an answer, we call
     // the callback.
@@ -995,20 +1014,18 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
             }
             // When we get a name conflict response, we need to re-do the update immediately
             // (with a 0-500ms delay of course).
-            do_srp_update(client, true);
+            do_srp_update(client, true, NULL);
         }
         break;
 
     default:
-        // Any other response has to be treated as a transient failure, so we need to retry
-        // This sort of failure is essentially unacceptable in a real deployment--it indicates
-        // that something is seriously broken.   But it's not up to the client to debug that.
-        retry_time = context->lease_time * 4 / 5;
-        // We don't want to retry _too_ often.
-        if (retry_time < 120) {
-            retry_time = 120;
-        }
-        srp_set_wakeup(client->os_context, context->udp_context, retry_time * 1000, renew_callback);
+        // If we get here, it means that the server failed to process the transmission, and there is no
+        // action we can take to change the situation other than trying another server. We set the
+        // retransmission time for the current server long enough to force a switch to the next server,
+        // if any.
+        context->next_retransmission_time = client->srp_max_retry_interval + 1;
+        // Immediately invoke the retransmit timer--there is no reason to wait.
+        udp_retransmit(context);
         break;
     }
 }
@@ -1297,7 +1314,7 @@ fail:
 
 // Send SRP updates for host records that have changed.
 static int
-do_srp_update(client_state_t *client, bool definite)
+do_srp_update(client_state_t *client, bool definite, bool *did_something)
 {
     int err;
     service_addr_t *server;
@@ -1327,6 +1344,11 @@ do_srp_update(client_state_t *client, bool definite)
             INFO("do_srp_update: addresses to register are the same; server is the same.");
             return kDNSServiceErr_NoError;
         }
+    }
+
+    // At this point we're definitely doing something.
+    if (did_something) {
+        *did_something = true;
     }
 
     // Get rid of the previous update, if any.

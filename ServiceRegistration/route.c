@@ -156,6 +156,7 @@ char *thread_interface_name;
 char *home_interface_name;
 bool thread_proxy_service_setup_done;
 bool interface_state_stable = false;
+bool have_non_thread_interface = false;
 
 #ifndef RA_TESTER
 cti_network_state_t current_thread_state = kCTI_NCPState_Uninitialized;
@@ -166,6 +167,9 @@ cti_connection_t thread_prefix_context;
 cti_connection_t thread_partition_id_context;
 #endif
 
+#if !defined(RA_TESTER)
+static wakeup_t *wpan_reconnect_wakeup;
+#endif
 
 #define CONFIGURE_STATIC_INTERFACE_ADDRESSES 1
 
@@ -197,6 +201,7 @@ static thread_pref_id_t *NULLABLE partition_find_lowest_valid_pref_id(void);
 static void partition_pref_id_timeout(void *UNUSED NULLABLE context);
 static void partition_post_election_wakeup(void *UNUSED NULLABLE context);
 static void partition_post_partition_timeout(void *UNUSED NULLABLE context);
+static void partition_discontinue_srp_service(void);
 static void partition_utun0_address_changed(const struct in6_addr *NONNULL addr, enum interface_address_change change);
 static bool partition_wait_for_prefix_settling(wakeup_callback_t NONNULL callback, uint64_t now);
 static void partition_got_tunnel_name(void);
@@ -298,8 +303,11 @@ interface_create_(const char *name, int ifindex, const char *file, int line)
 
         ret->index = ifindex;
         ret->inactive = true;
-        // Interfaces are ineligible for routing until explicitly identified as eligible.
-        ret->ineligible = true;
+        if (!strcmp(name, "lo") || !strcmp(name, "wpan0")) {
+            ret->ineligible = true;
+        } else {
+            ret->ineligible = false;
+        }
     }
     return ret;
 }
@@ -615,18 +623,10 @@ interface_prefix_deconfigure(void *context)
     INFO("interface_prefix_deconfigure: post solicit wakeup.");
 
     // If our on-link prefix is still deprecated, deconfigure it from the interface.
-#if defined(USE_IPCONFIGURATION_SERVICE)
-    if (interface->preferred_lifetime != 0 && interface->ip_configuration_service != NULL) {
-        CFRelease(interface->ip_configuration_service);
-        interface->ip_configuration_service = NULL;
-        interface->valid_lifetime = 0;
-    }
-#else
     if (interface->preferred_lifetime != 0) {
         INFO("interface_prefix_deconfigure: PUT PREFIX DECONFIGURE CODE HERE!!");
         interface->valid_lifetime = 0;
     }
-#endif // USE_IPCONFIGURATION_SERVICE
     interface->deprecate_deadline = 0;
 }
 
@@ -668,6 +668,9 @@ interface_beacon(void *context)
         interface->sent_first_beacon = true;
         interface->last_beacon = ioloop_timenow();;
 #ifndef RA_TESTER
+    } else {
+        INFO("Didn't send: %s %s", partition_can_provide_routing ? "canpr" : "can'tpr",
+             interface->advertise_ipv6_prefix ? "adv6" : "!adv6");
     }
 #endif
     interface_beacon_schedule(interface, icmp_listener.unsolicited_interval);
@@ -705,7 +708,7 @@ interface_beacon_schedule(interface_t *interface, unsigned when)
         interval = (unsigned)(interface->next_beacon - now);
     }
     INFO("Scheduling " PUB_S_SRP "beacon on " PUB_S_SRP " for %u milliseconds in the future",
-         interface->sent_first_beacon ? "first " : "", interface->name, interval);
+         interface->sent_first_beacon ? "" : "first ", interface->name, interval);
     ioloop_add_wake_event(interface->beacon_wakeup, interface, interface_beacon, interface_wakeup_finalize, interval);
 }
 
@@ -1141,163 +1144,7 @@ out:
     return;
 }
 
-#if defined(USE_IPCONFIGURATION_SERVICE)
-static void
-dict_add_string_as_array(CFMutableDictionaryRef dict, CFStringRef prop_name, const char * str)
-{
-    CFArrayRef        array;
-    CFStringRef        prop_val;
-
-    if (str == NULL) {
-        return;
-    }
-    prop_val = CFStringCreateWithCString(NULL, str, kCFStringEncodingUTF8);
-    array = CFArrayCreate(NULL, (const void **)&prop_val, 1, &kCFTypeArrayCallBacks);
-    CFRelease(prop_val);
-    CFDictionarySetValue(dict, prop_name, array);
-    CFRelease(array);
-    return;
-}
-
-static void
-dict_add_int_as_array(CFMutableDictionaryRef dict, CFStringRef prop_name,
-              int int_val)
-{
-    CFArrayRef        array;
-    CFNumberRef        num;
-
-    num = CFNumberCreate(NULL, kCFNumberIntType, &int_val);
-    array = CFArrayCreate(NULL, (const void **)&num, 1, &kCFTypeArrayCallBacks);
-    CFRelease(num);
-    CFDictionarySetValue(dict, prop_name, array);
-    CFRelease(array);
-    return;
-}
-
-static CFDictionaryRef
-ipconfig_options_dict_create(CFDictionaryRef config_dict)
-{
-    return CFDictionaryCreate(NULL, (const void **)&kIPConfigurationServiceOptionIPv6Entity,
-                              (const void **)&config_dict, 1, &kCFTypeDictionaryKeyCallBacks,
-                              &kCFTypeDictionaryValueCallBacks);
-}
-
-static void
-ipconfig_service_changed(interface_t * interface)
-{
-    CFDictionaryRef     service_info;
-
-    if (interface->ip_configuration_service == NULL) {
-        INFO("ipconfig_service_changed: ip_configuration_service is NULL");
-        return;
-    }
-    service_info = IPConfigurationServiceCopyInformation(interface->ip_configuration_service);
-    if (service_info == NULL) {
-        INFO("ipconfig_service_changed: IPConfigurationService on " PUB_S_SRP " is incomplete", interface->name);
-    }
-    else {
-        INFO("ipconfig_service_changed: IPConfigurationService on " PUB_S_SRP " is ready", interface->name);
-        CFRelease(service_info);
-
-        // Now that the prefix is configured on the interface, we can start advertising it.
-        interface->on_link_prefix_configured = true;
-        routing_policy_evaluate(interface, true);
-    }
-    return;
-
-}
-
-
-static void
-ipconfig_service_callback(SCDynamicStoreRef UNUSED session, CFArrayRef UNUSED changes,
-                          void * info)
-{
-    interface_t *	interface = (interface_t *)info;
-
-    ipconfig_service_changed(interface);
-    return;
-}
-
-static void
-monitor_ipconfig_service(interface_t * interface)
-{
-    SCDynamicStoreContext    context = {
-                       .version = 0,
-                       .info = NULL,
-                       .retain = NULL,
-                       .release = NULL,
-                       .copyDescription = NULL
-    };
-    CFArrayRef            keys;
-    SCDynamicStoreRef    store;
-    CFStringRef            store_key;
-
-    if (interface->ip_configuration_store != NULL) {
-        INFO("Releasing old SCDynamicStore object for " PUB_S_SRP, interface->name);
-        SCDynamicStoreSetDispatchQueue(interface->ip_configuration_store, NULL);
-        CFRelease(interface->ip_configuration_store);
-        interface->ip_configuration_store = NULL;
-    }
-
-#define OUR_IDENTIFIER    CFSTR("ThreadBorderRouter")
-    context.info = interface;
-    store = SCDynamicStoreCreate(NULL, OUR_IDENTIFIER,
-                                 ipconfig_service_callback, &context);
-    store_key = IPConfigurationServiceGetNotificationKey(interface->ip_configuration_service);
-    keys = CFArrayCreate(NULL, (const void * *)&store_key,
-                         1,
-                         &kCFTypeArrayCallBacks);
-    SCDynamicStoreSetNotificationKeys(store, keys, NULL);
-    CFRelease(keys);
-
-    /* avoid race with being notified */
-    ipconfig_service_changed(interface);
-    SCDynamicStoreSetDispatchQueue(store, dispatch_get_main_queue());
-    interface->ip_configuration_store = (void *)store;
-}
-
-static Boolean
-start_ipconfig_service(interface_t *interface, const char *ip6addr_str)
-{
-	CFMutableDictionaryRef config_dict;
-    CFStringRef interface_name;
-    CFDictionaryRef options;
-
-    if (interface->ip_configuration_service != NULL) {
-        INFO("start_ipconfig_service: releasing old IPConfigurationService object for " PUB_S_SRP, interface->name);
-        CFRelease(interface->ip_configuration_service);
-        interface->ip_configuration_service = NULL;
-    }
-
-    // Create an IPv6 entity dictionary with ConfigMethod, Addresses, and PrefixLength properties
-    config_dict = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    CFDictionarySetValue(config_dict, kSCPropNetIPv6ConfigMethod, kSCValNetIPv6ConfigMethodManual);
-#define PREFIX_LENGTH    64
-    dict_add_string_as_array(config_dict, kSCPropNetIPv6Addresses, ip6addr_str);
-    dict_add_int_as_array(config_dict, kSCPropNetIPv6PrefixLength, PREFIX_LENGTH);
-    options = ipconfig_options_dict_create(config_dict);
-    CFRelease(config_dict);
-    interface_name = CFStringCreateWithCString(NULL, interface->name, kCFStringEncodingUTF8);
-    interface->ip_configuration_service = IPConfigurationServiceCreate(interface_name, options);
-    CFRelease(interface_name);
-    CFRelease(options);
-    if (interface->ip_configuration_service == NULL) {
-        ERROR("start_ipconfig_service: IPConfigurationServiceCreate on " PUB_S_SRP " failed", interface->name);
-    }
-    else {
-        monitor_ipconfig_service(interface);
-        struct in6_addr ip6addr;
-        int ret = inet_pton(AF_INET6, ip6addr_str, ip6addr.s6_addr);
-        if (ret == 1) {
-            SEGMENTED_IPv6_ADDR_GEN_SRP(ip6addr.s6_addr, ip6addr_buf);
-            ERROR("start_ipconfig_service: IPConfigurationServiceCreate on " PRI_S_SRP "/" PRI_SEGMENTED_IPv6_ADDR_SRP
-                  " succeeded", interface->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(ip6addr.s6_addr, ip6addr_buf));
-        }
-	}
-    return (interface->ip_configuration_service != NULL);
-}
-
-#elif defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG) || \
+#if   defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG) || \
       defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IFCONFIG)
 static void
 link_route_done(void *context, int status, const char *error)
@@ -1329,15 +1176,10 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
     }
 #ifdef CONFIGURE_STATIC_INTERFACE_ADDRESSES
     struct in6_addr interface_address = prefix;
-    char addrbuf[INET6_ADDRSTRLEN];
+    char addrbuf[INET6_ADDRSTRLEN + 4];
     interface_address.s6_addr[15] = 1;
     inet_ntop(AF_INET6, &interface_address, addrbuf, INET6_ADDRSTRLEN);
-#if defined (USE_IPCONFIGURATION_SERVICE)
-    if (!start_ipconfig_service(interface, addrbuf)) {
-        close(sock);
-        return;
-    }
-#elif defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG)
+#if   defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG)
     char *args[] = { "set", interface->name, "MANUAL-V6", addrbuf, "64" };
 
     INFO("interface_prefix_configure: /sbin/ipconfig " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " "
@@ -1347,10 +1189,16 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
         ERROR("interface_prefix_configure: unable to set interface address for %s to %s.", interface->name, addrbuf);
     }
 #elif defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IFCONFIG)
-    char *args[] = { interface->name, addrbuf, "64" };
+    char *eos = addrbuf + strlen(addrbuf);
+    if (sizeof(addrbuf) - (eos - addrbuf) < 4) {
+        ERROR("interface_prefix_configure: this shouldn't happen: no space in addrbuf");
+        return;
+    }
+    strcpy(eos, "/64");
+    char *args[] = { interface->name, "add", addrbuf };
 
     INFO("interface_prefix_configure: /sbin/ifconfig %s %s %s", args[0], args[1], args[2]);
-    link_route_adder_process = ioloop_subproc("/usr/sbin/ipconfig", args, 3, link_route_done, NULL, interface);
+    link_route_adder_process = ioloop_subproc("/sbin/ifconfig", args, 3, link_route_done, NULL, interface);
     if (link_route_adder_process == NULL) {
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface_address.s6_addr, if_addr_buf);
         ERROR("interface_prefix_configure: unable to set interface address for " PUB_S_SRP " to "
@@ -1540,7 +1388,7 @@ set_thread_prefix(void)
     int status = cti_add_prefix(NULL, cti_add_prefix_callback, NULL,
                                 &advertised_thread_prefix->prefix, advertised_thread_prefix->prefix_len,
                                 true, true, true, true);
-    if (status) {
+    if (status != kCTIStatus_NoError) {
         ERROR("Unable to add thread interface prefix.");
     }
 #endif
@@ -1779,17 +1627,17 @@ static void
 icmp_send(uint8_t *message, size_t length, interface_t *interface, const struct in6_addr *destination)
 {
     struct iovec iov;
-    socklen_t cmsg_length = CMSG_SPACE(sizeof(struct in6_pktinfo)) + CMSG_SPACE(sizeof (int));
+    struct in6_pktinfo *packet_info;
+    socklen_t cmsg_length = CMSG_SPACE(sizeof(*packet_info)) + CMSG_SPACE(sizeof (int));
     uint8_t *cmsg_buffer;
     struct msghdr msg_header;
     struct cmsghdr *cmsg_pointer;
-    struct in6_pktinfo *packet_info;
     int hop_limit = 255;
     ssize_t rv;
     struct sockaddr_in6 dest;
 
     // Make space for the control message buffer.
-    cmsg_buffer = malloc(cmsg_length);
+    cmsg_buffer = calloc(1, cmsg_length);
     if (cmsg_buffer == NULL) {
         ERROR("Unable to construct ICMP Router Advertisement: no memory");
         return;
@@ -1817,7 +1665,7 @@ icmp_send(uint8_t *message, size_t length, interface_t *interface, const struct 
     cmsg_pointer = CMSG_FIRSTHDR(&msg_header);
     cmsg_pointer->cmsg_level = IPPROTO_IPV6;
     cmsg_pointer->cmsg_type = IPV6_PKTINFO;
-    cmsg_pointer->cmsg_len = CMSG_LEN(sizeof(struct in6_pktinfo));
+    cmsg_pointer->cmsg_len = CMSG_LEN(sizeof(*packet_info));
     packet_info = (struct in6_pktinfo *)CMSG_DATA(cmsg_pointer);
     memset(packet_info, 0, sizeof(*packet_info));
     packet_info->ipi6_ifindex = interface->index;
@@ -1878,7 +1726,14 @@ ula_record(const char *ula_printable)
         CFRelease(ula_string);
     }
 #else
-    ERROR("Add support for recording the ULA!");
+    size_t len = strlen(ula_printable);
+    if (access("/var/lib/openthread", F_OK) < 0) {
+        if (mkdir("/var/lib/openthread", 0700) < 0) {
+            ERROR("ula_record: /var/lib/openthread not present and can't be created: %s", strerror(errno));
+            return;
+        }
+    }
+    srp_store_file_data(NULL, "/var/lib/openthread/thread-mesh-ula", (uint8_t *)ula_printable, len);
 #endif // IOLOOP_MACOS
 }
 
@@ -1977,7 +1832,13 @@ ula_setup(void)
         }
     }
 #else
-    ERROR("Add support for storing and recovering ULA prefix.");
+    char ula_buf[INET6_ADDRSTRLEN];
+    uint16_t length;
+    if (srp_load_file_data(NULL, "/var/lib/openthread/thread-mesh-ula", (uint8_t *)ula_buf, &length, sizeof(ula_buf))) {
+        if (inet_pton(AF_INET6, ula_buf, &ula_prefix)) {
+            have_stored_ula_prefix = true;
+        }
+    }
 #endif // IOLOOP_MACOS
 
     // If we didn't already successfully fetch a stored prefix, try to store one.
@@ -2189,12 +2050,6 @@ interface_shutdown(interface_t *interface)
         icmp_message_free(router);
     }
     interface->routers = NULL;
-#ifdef USE_IPCONFIGURATION_SERVICE
-    if (interface->ip_configuration_service != NULL) {
-        CFRelease(interface->ip_configuration_service);
-        interface->ip_configuration_service = NULL;
-    }
-#endif
     interface->last_beacon = interface->next_beacon = 0;
     interface->deprecate_deadline = 0;
     interface->preferred_lifetime = interface->valid_lifetime = 0;
@@ -2227,6 +2082,12 @@ interface_active_state_evaluate(interface_t *interface, bool active_known, bool 
 {
     if (active_known && !active) {
         if (!interface->inactive) {
+            // Set up the thread-local prefix
+            interface_prefix_evaluate(interface);
+
+            // We need to reevaluate routing policy on the new primary interface now, because
+            // there may be no new event there to trigger one.
+            routing_policy_evaluate(interface, true);
 
             // Clean the slate.
             icmp_interface_subscribe(interface, false);
@@ -2285,7 +2146,7 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
     interface_t *interface;
     bool is_thread_interface = false;
 
-#ifndef OPEN_SOURCE
+#ifndef POSIX_BUILD
     interface = find_interface(name, -1);
 #else
     interface = find_interface(name, if_nametoindex(name));
@@ -2421,7 +2282,7 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
 #endif
     }
 #ifdef LINUX
-    interface_active_state_evaluate(interface, false, false);
+    interface_active_state_evaluate(interface, true, true);
 #endif
 }
 
@@ -2502,10 +2363,37 @@ thread_interface_done(void *UNUSED context, int status, const char *error)
 }
 #endif // GET_TUNNEL_NAME_WITH_WPANCTL
 
+#if !defined(RA_TESTER)
+#if defined(POSIX_BUILD)
+static void
+wpan_reconnect_wakeup_callback(void *UNUSED context)
+{
+    if (wpan_reconnect_wakeup != NULL) {
+        ioloop_wakeup_release(wpan_reconnect_wakeup);
+        wpan_reconnect_wakeup = NULL;
+    }
+    // Attempt to restart the thread network...
+    thread_network_startup();
+}
+#endif
+
 static void
 attempt_wpan_reconnect(void)
 {
+#if defined(POSIX_BUILD)
+    if (wpan_reconnect_wakeup == NULL) {
+        wpan_reconnect_wakeup = ioloop_wakeup_create();
+        if (wpan_reconnect_wakeup == NULL) {
+            ERROR("attempt_wpan_reconnect: can't allocate wpan reconnect wait wakeup.");
+            return;
+        }
+        INFO("attempt_wpan_reconnect: delaying for ten seconds before attempt to reconnect to thread daemon.");
+        ioloop_add_wake_event(wpan_reconnect_wakeup, NULL, wpan_reconnect_wakeup_callback, NULL, 10 * 1000);
+        partition_state_reset();
+#endif
+    }
 }
+#endif // RA_TESTER
 
 static void
 cti_get_tunnel_name_callback(void *UNUSED context, const char *name, cti_status_t status)
@@ -2681,13 +2569,13 @@ cti_service_list_callback(void *UNUSED context, cti_service_vec_t *services, cti
     thread_pref_id_t **ppref_id = &thread_pref_ids, *pref_id = NULL;
 
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
-        INFO("cti_get_service_list_callback: disconnected");
+        INFO("cti_service_list_callback: disconnected");
         attempt_wpan_reconnect();
         return;
     }
 
     if (status != kCTIStatus_NoError) {
-        ERROR("cti_get_service_list_callback: %d", status);
+        ERROR("cti_service_list_callback: %d", status);
     } else {
         // Delete any SRP services that are not in the list provided by Thread.
         while (*pservice != NULL) {
@@ -3009,6 +2897,7 @@ thread_network_startup(void)
 {
     INFO("thread_network_startup: Thread network started.");
 
+//    ioloop_network_watcher_start(network_watch_event);
 #if defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
     get_thread_interface_list();
 #endif
@@ -3018,12 +2907,29 @@ thread_network_startup(void)
 #endif
 
 #ifndef RA_TESTER
-    cti_get_state(&thread_state_context, NULL, cti_get_state_callback, NULL);
-    cti_get_network_node_type(&thread_role_context, NULL, cti_get_role_callback, NULL);
-    cti_get_service_list(&thread_service_context, NULL, cti_service_list_callback, NULL);
-    cti_get_prefix_list(&thread_prefix_context, NULL, cti_prefix_list_callback, NULL);
-    cti_get_tunnel_name(NULL, cti_get_tunnel_name_callback, NULL);
-    cti_get_partition_id(&thread_partition_id_context, NULL, cti_get_partition_id_callback, NULL);
+    int status = cti_get_state(&thread_state_context, NULL, cti_get_state_callback, NULL);
+    if (status == kCTIStatus_NoError) {
+        status = cti_get_network_node_type(&thread_role_context, NULL, cti_get_role_callback, NULL);
+    }
+    if (status == kCTIStatus_NoError) {
+        status = cti_get_service_list(&thread_service_context, NULL, cti_service_list_callback, NULL);
+    }
+    if (status == kCTIStatus_NoError) {
+        status = cti_get_prefix_list(&thread_prefix_context, NULL, cti_prefix_list_callback, NULL);
+    }
+    if (status == kCTIStatus_NoError) {
+        status = cti_get_tunnel_name(NULL, cti_get_tunnel_name_callback, NULL);
+    }
+    if (status == kCTIStatus_NoError) {
+        status = cti_get_partition_id(&thread_partition_id_context, NULL, cti_get_partition_id_callback, NULL);
+    }
+    if (status != kCTIStatus_NoError) {
+        if (status == kCTIStatus_DaemonNotRunning) {
+            attempt_wpan_reconnect();
+        } else {
+            ERROR("thread_network_startup: initial network setup failed");
+        }
+    }
 #endif
 }
 
@@ -3711,8 +3617,12 @@ partition_proxy_listener_ready(void *UNUSED context, uint16_t port)
 {
     INFO("partition_proxy_listener_ready: listening on port %d", port);
     srp_service_listen_port = port;
-    partition_can_advertise_service = true;
-    partition_maybe_advertise_service();
+    if (have_non_thread_interface) {
+        partition_can_advertise_service = true;
+        partition_maybe_advertise_service();
+    } else {
+        partition_discontinue_srp_service();
+    }
 }
 
 void
@@ -3737,6 +3647,23 @@ partition_start_srp_listener(void)
         ERROR("partition_start_srp_listener: Unable to start SRP Proxy listener, so can't advertise it");
         return;
     }
+}
+
+static void
+partition_discontinue_srp_service()
+{
+    if (srp_listener != NULL) {
+        srp_proxy_listener_cancel(srp_listener);
+        srp_listener = NULL;
+    }
+
+    // Won't match
+    memset(&srp_listener_ip_address, 0, 16);
+    srp_service_listen_port = 0;
+    partition_can_advertise_service = false;
+
+    // Stop advertising the service, if we are doing so.
+    partition_stop_advertising_service();
 }
 
 // An address on utun0 has changed.  Evaluate what to do with our listener service.
@@ -3771,15 +3698,8 @@ partition_utun0_address_changed(const struct in6_addr *addr, enum interface_addr
             if (srp_listener != NULL) {
                 INFO("partition_utun0_address_changed: " PRI_SEGMENTED_IPv6_ADDR_SRP
                      ": canceling listener on removed address.", SEGMENTED_IPv6_ADDR_PARAM_SRP(addr, addr_buf));
-                srp_proxy_listener_cancel(srp_listener);
-                srp_listener = NULL;
-                // Won't match
-                memset(&srp_listener_ip_address, 0, 16);
-                srp_service_listen_port = 0;
-                partition_can_advertise_service = false;
+                partition_discontinue_srp_service();
             }
-            // Stop advertising the service, if we are doing so.
-            partition_stop_advertising_service();
         } else {
             // This should never happen.
             if (change == interface_address_added) {
@@ -3816,18 +3736,22 @@ partition_utun0_address_changed(const struct in6_addr *addr, enum interface_addr
             {
                 // See if we already have a listener; if so, stop it.
                 if (srp_listener_ip_address.s6_addr[0] != 0) {
-                    INFO("partition_utun0_address_changed: " PRI_SEGMENTED_IPv6_ADDR_SRP
-                         ": stopping old listener and starting a new one.",
+                    INFO("partition_utun0_address_changed: " PRI_SEGMENTED_IPv6_ADDR_SRP ": stopping old listener.",
                          SEGMENTED_IPv6_ADDR_PARAM_SRP(addr, addr_buf));
                     srp_proxy_listener_cancel(srp_listener);
                     srp_listener = NULL;
-                } else {
-                    INFO("partition_utun0_address_changed: " PRI_SEGMENTED_IPv6_ADDR_SRP ": starting a new listener.",
-                         SEGMENTED_IPv6_ADDR_PARAM_SRP(addr, addr_buf));
                 }
-                memcpy(&srp_listener_ip_address, addr, 16);
-                srp_service_listen_port = 0;
-                partition_start_srp_listener();
+                if (srp_listener == NULL) {
+                    if (!have_non_thread_interface) {
+                        INFO("partition_utun0_address_changed: not starting a listener because we have no infrastructure");
+                    } else {
+                        INFO("partition_utun0_address_changed: " PRI_SEGMENTED_IPv6_ADDR_SRP ": starting a new listener.",
+                             SEGMENTED_IPv6_ADDR_PARAM_SRP(addr, addr_buf));
+                        memcpy(&srp_listener_ip_address, addr, 16);
+                        srp_service_listen_port = 0;
+                        partition_start_srp_listener();
+                    }
+                }
             }
         } else {
             INFO("partition_utun0_address_changed: " PRI_SEGMENTED_IPv6_ADDR_SRP
@@ -4196,6 +4120,15 @@ partition_maybe_advertise_service(void)
     if (partition_service_blocked) {
         INFO("partition_maybe_advertise_service: service advertising is disabled.");
         return;
+    }
+
+    for (i = 0; i < 16; i++) {
+        if (srp_listener_ip_address.s6_addr[i] != 0) {
+            break;
+        }
+    }
+    if (i == 16) {
+        INFO("partition_maybe_advertise_service: no listener.");
     }
 
     // The add service function requires a remove prior to the add, so if we are doing an add, we need to wait

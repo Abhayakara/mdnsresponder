@@ -54,23 +54,10 @@ cti_internal_reply_callback(cti_connection_t conn_ref, void *UNUSED object, cti_
     callback = conn_ref->callback.reply;
     if (callback != NULL) {
         callback(conn_ref->context, status);
+        // We only ever call this callback once.
+        conn_ref->callback.reply = NULL;
     }
     cti_connection_close(conn_ref);
-}
-
-// For event comamnds, we return failure and close; on success, we just wait for events to flow and return those.
-static void
-cti_internal_event_reply_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
-{
-    cti_reply_t callback;
-    INFO("cti_internal_event_reply_callback: conn_ref = %p", conn_ref);
-    if (status != kCTIStatus_NoError) {
-        callback = conn_ref->callback.reply;
-        if (callback != NULL) {
-            callback(conn_ref->context, status);
-        }
-        cti_connection_close(conn_ref);
-    }
 }
 
 static void
@@ -78,15 +65,25 @@ cti_fd_finalize(void *context)
 {
     cti_connection_t connection = context;
     connection->io_context = NULL;
+    if (connection->callback.reply != NULL && connection->internal_callback != NULL) {
+        connection->internal_callback(connection, NULL, kCTIStatus_Disconnected);
+    }
     RELEASE_HERE(connection, cti_connection_finalize);
 }
 
 void
 cti_connection_close(cti_connection_t connection)
 {
-    ioloop_close(connection->io_context);
-    ioloop_file_descriptor_release(connection->io_context);
-    connection->io_context = NULL;
+    // The reason we test for NULL here is to save some typing: when a connection is closed remotely, we have call the
+    // internal event handler for the event; this event handler closes the connection when we've just received a
+    // successful reply. However, when the remote end closes the connection without that reply having been processed, we
+    // get to the internal callback with connection->io_context set to NULL. Rather than checking in every event handler,
+    // it's easier to check here.
+    if (connection->io_context != NULL) {
+        ioloop_close(connection->io_context);
+        ioloop_file_descriptor_release(connection->io_context);
+        connection->io_context = NULL;
+    }
 }
 
 static void
@@ -170,7 +167,7 @@ cti_connection_create(void *context, cti_callback_t callback,
     }
 
     if (connect(connection->fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        syslog(LOG_ERR, "cti_init: %s", strerror(errno));
+        syslog(LOG_ERR, "cti_connection_create: %s", strerror(errno));
     out:
         close(connection->fd);
         cti_connection_release(connection);
@@ -192,6 +189,7 @@ cti_connection_create(void *context, cti_callback_t callback,
         goto out;
     }
     ioloop_add_reader(connection->io_context, cti_connection_read_callback);
+    connection->context = context;
     connection->callback = callback;
     connection->internal_callback = internal_callback;
     *retcon = connection;
@@ -335,6 +333,7 @@ cti_internal_tunnel_reply_callback(cti_connection_t conn_ref, void *tunnel_name,
     callback = conn_ref->callback.tunnel_reply;
     if (callback != NULL) {
         callback(conn_ref->context, tunnel_name, status);
+        conn_ref->callback.reply = NULL;
     }
     cti_connection_close(conn_ref);
 }
@@ -363,7 +362,22 @@ cti_get_tunnel_name(void *NULLABLE context, cti_tunnel_reply_t NONNULL callback,
     return ret;
 }
 
-
+// For event comamnds, we return failure and close; on success, we just wait for events to flow and return those.
+static void
+cti_internal_state_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
+{
+    cti_state_reply_t callback;
+    INFO("cti_internal_state_event_callback: conn_ref = %p", conn_ref);
+    if (status != kCTIStatus_NoError) {
+        callback = conn_ref->callback.state_reply;
+        if (callback != NULL) {
+            callback(conn_ref->context, 0, status);
+            // Only one error callback ever.
+            conn_ref->callback.reply = NULL;
+        }
+        cti_connection_close(conn_ref);
+    }
+}
 
 cti_status_t
 cti_get_state(cti_connection_t *ref, void *NULLABLE context, cti_state_reply_t NONNULL callback,
@@ -373,7 +387,7 @@ cti_get_state(cti_connection_t *ref, void *NULLABLE context, cti_state_reply_t N
     app_callback.state_reply = callback;
     int ret;
     cti_connection_t conn_ref;
-    ret = cti_connection_create(context, app_callback, cti_internal_event_reply_callback, &conn_ref);
+    ret = cti_connection_create(context, app_callback, cti_internal_state_event_callback, &conn_ref);
     if (ret == kCTIStatus_NoError) {
         if (cti_connection_message_create(conn_ref, kCTIMessageType_RequestStateEvents, 4)) {
             if (!cti_connection_message_send(conn_ref)) {
@@ -389,6 +403,22 @@ cti_get_state(cti_connection_t *ref, void *NULLABLE context, cti_state_reply_t N
     return ret;
 }
 
+// For event comamnds, we return failure and close; on success, we just wait for events to flow and return those.
+static void
+cti_internal_partition_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
+{
+    cti_partition_id_reply_t callback;
+    INFO("cti_internal_partition_event_callback: conn_ref = %p", conn_ref);
+    if (status != kCTIStatus_NoError) {
+        callback = conn_ref->callback.partition_id_reply;
+        if (callback != NULL) {
+            callback(conn_ref->context, 0, status);
+            // Only one error callback ever.
+            conn_ref->callback.reply = NULL;
+        }
+        cti_connection_close(conn_ref);
+    }
+}
 
 cti_status_t
 cti_get_partition_id(cti_connection_t *ref, void *NULLABLE context, cti_partition_id_reply_t NONNULL callback,
@@ -398,7 +428,7 @@ cti_get_partition_id(cti_connection_t *ref, void *NULLABLE context, cti_partitio
     app_callback.partition_id_reply = callback;
     int ret;
     cti_connection_t conn_ref;
-    ret = cti_connection_create(context, app_callback, cti_internal_event_reply_callback, &conn_ref);
+    ret = cti_connection_create(context, app_callback, cti_internal_partition_event_callback, &conn_ref);
     if (ret == kCTIStatus_NoError) {
         if (cti_connection_message_create(conn_ref, kCTIMessageType_RequestPartitionEvents, 4)) {
             if (!cti_connection_message_send(conn_ref)) {
@@ -414,6 +444,22 @@ cti_get_partition_id(cti_connection_t *ref, void *NULLABLE context, cti_partitio
     return ret;
 }
 
+// For event comamnds, we return failure and close; on success, we just wait for events to flow and return those.
+static void
+cti_internal_node_type_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
+{
+    cti_network_node_type_reply_t callback;
+    INFO("cti_internal_node_type_event_callback: conn_ref = %p", conn_ref);
+    if (status != kCTIStatus_NoError) {
+        callback = conn_ref->callback.network_node_type_reply;
+        if (callback != NULL) {
+            callback(conn_ref->context, 0, status);
+            // Only one error callback ever.
+            conn_ref->callback.reply = NULL;
+        }
+        cti_connection_close(conn_ref);
+    }
+}
 
 cti_status_t
 cti_get_network_node_type(cti_connection_t *ref, void *NULLABLE context, cti_network_node_type_reply_t NONNULL callback,
@@ -423,7 +469,7 @@ cti_get_network_node_type(cti_connection_t *ref, void *NULLABLE context, cti_net
     app_callback.network_node_type_reply = callback;
     int ret;
     cti_connection_t conn_ref;
-    ret = cti_connection_create(context, app_callback, cti_internal_event_reply_callback, &conn_ref);
+    ret = cti_connection_create(context, app_callback, cti_internal_node_type_event_callback, &conn_ref);
     if (ret == kCTIStatus_NoError) {
         if (cti_connection_message_create(conn_ref, kCTIMessageType_RequestRoleEvents, 4)) {
             if (!cti_connection_message_send(conn_ref)) {
@@ -511,6 +557,22 @@ cti_service_release_(cti_service_t *service, const char *file, int line)
     RELEASE(service, cti_service_finalize);
 }
 
+// For event comamnds, we return failure and close; on success, we just wait for events to flow and return those.
+static void
+cti_internal_service_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
+{
+    cti_service_reply_t callback;
+    INFO("cti_internal_service_event_callback: conn_ref = %p", conn_ref);
+    if (status != kCTIStatus_NoError) {
+        callback = conn_ref->callback.service_reply;
+        if (callback != NULL) {
+            callback(conn_ref->context, 0, status);
+            // Only one error callback ever.
+            conn_ref->callback.reply = NULL;
+        }
+        cti_connection_close(conn_ref);
+    }
+}
 
 cti_status_t
 cti_get_service_list(cti_connection_t *ref, void *NULLABLE context, cti_service_reply_t NONNULL callback,
@@ -520,7 +582,7 @@ cti_get_service_list(cti_connection_t *ref, void *NULLABLE context, cti_service_
     app_callback.service_reply = callback;
     int ret;
     cti_connection_t conn_ref;
-    ret = cti_connection_create(context, app_callback, cti_internal_event_reply_callback, &conn_ref);
+    ret = cti_connection_create(context, app_callback, cti_internal_service_event_callback, &conn_ref);
     if (ret == kCTIStatus_NoError) {
         if (cti_connection_message_create(conn_ref, kCTIMessageType_RequestServiceEvents, 4)) {
             if (!cti_connection_message_send(conn_ref)) {
@@ -602,6 +664,22 @@ cti_prefix_release_(cti_prefix_t *prefix, const char *file, int line)
     RELEASE(prefix, cti_prefix_finalize);
 }
 
+// For event comamnds, we return failure and close; on success, we just wait for events to flow and return those.
+static void
+cti_internal_prefix_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
+{
+    cti_prefix_reply_t callback;
+    INFO("cti_internal_prefix_event_callback: conn_ref = %p", conn_ref);
+    if (status != kCTIStatus_NoError) {
+        callback = conn_ref->callback.prefix_reply;
+        if (callback != NULL) {
+            callback(conn_ref->context, 0, status);
+            // Only one error callback ever.
+            conn_ref->callback.reply = NULL;
+        }
+        cti_connection_close(conn_ref);
+    }
+}
 
 cti_status_t
 cti_get_prefix_list(cti_connection_t *ref, void *NULLABLE context, cti_prefix_reply_t NONNULL callback,
@@ -611,7 +689,7 @@ cti_get_prefix_list(cti_connection_t *ref, void *NULLABLE context, cti_prefix_re
     app_callback.prefix_reply = callback;
     int ret;
     cti_connection_t conn_ref;
-    ret = cti_connection_create(context, app_callback, cti_internal_event_reply_callback, &conn_ref);
+    ret = cti_connection_create(context, app_callback, cti_internal_prefix_event_callback, &conn_ref);
     if (ret == kCTIStatus_NoError) {
         if (cti_connection_message_create(conn_ref, kCTIMessageType_RequestPrefixEvents, 4)) {
             if (!cti_connection_message_send(conn_ref)) {

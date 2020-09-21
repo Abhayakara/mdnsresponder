@@ -23,7 +23,7 @@ else
   INSTALL_PREFIX=$(DESTDIR)/usr
 endif
 
-CP?=/bin/cp
+INSTALL?=install
 
 ifeq ($(os),x)
 SRPCFLAGS = -O0 -g -Wall -Werror -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $@} -DUSE_KQUEUE -DHAVE_SOCKADDR_DL -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DEXCLUDE_TLS -DPOSIX_BUILD -D__APPLE_USE_RFC_3542
@@ -54,8 +54,13 @@ TLSOBJS      = $(OBJDIR)/tls-mbedtls.o
 IOOBJS       = $(OBJDIR)/ioloop.o $(OBJDIR)/posix.o $(TLSOBJS)
 IOWOTLSOBJS  = $(OBJDIR)/ioloop-notls.o $(OBJDIR)/posix.o
 else ifeq ($(os), raspbian)
-SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DRPI -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD
-SRPLDOPTS = /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedx509.a /usr/local/lib/libmbedcrypto.a -lbsd
+ifdef ASAN
+SRPCFLAGS    = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DRPI -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD -fsanitize=address
+SRPLDOPTS    = -lasan -lmbedtls -lmbedx509 -lmbedcrypto -lbsd
+else
+SRPCFLAGS    = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DRPI -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD
+SRPLDOPTS    = -lmbedtls -lmbedx509 -lmbedcrypto -lbsd
+endif
 HMACOBJS     = $(OBJDIR)/hmac-mbedtls.o
 SIGNOBJS     = $(OBJDIR)/sign-mbedtls.o $(OBJDIR)/srp-filedata.o
 VERIFYOBJS   = $(OBJDIR)/verify-mbedtls.o
@@ -69,12 +74,12 @@ endif
 all:	setup $(BUILDDIR)/srp-client $(BUILDDIR)/srp-mdns-proxy $(BUILDDIR)/keydump $(BUILDDIR)/dnssd-proxy $(BUILDDIR)/cti-server # $(BUILDDIR)/srp-dns-proxy $(BUILDDIR)/dnssd-relay
 
 install: all
-	$(CP) $(BUILDDIR)/srp-client $(INSTALL_PREFIX)/sbin
-	$(CP) $(BUILDDIR)/srp-dns-proxy $(INSTALL_PREFIX)/sbin
-	$(CP) $(BUILDDIR)/srp-mdns-proxy $(INSTALL_PREFIX)/sbin
-	$(CP) $(BUILDDIR)/dnssd-proxy $(INSTALL_PREFIX)/sbin
-	$(CP) $(BUILDDIR)/keydump $(INSTALL_PREFIX)/bin
-	$(CP) $(BUILDDIR)/cti-server $(INSTALL_PREFIX)/sbin
+	$(INSTALL) -D $(BUILDDIR)/srp-client $(INSTALL_PREFIX)/sbin/srp-client
+	$(INSTALL) -D $(BUILDDIR)/srp-mdns-proxy $(INSTALL_PREFIX)/sbin/srp-mdns-proxy
+	$(INSTALL) -D $(BUILDDIR)/keydump $(INSTALL_PREFIX)/bin/keydump
+	$(INSTALL) -D $(BUILDDIR)/dnssd-proxy $(INSTALL_PREFIX)/sbin/dnssd-proxy
+	$(INSTALL) -D $(BUILDDIR)/srp-dns-proxy $(INSTALL_PREFIX)/sbin/srp-dns-proxy
+#	$(INSTALL) -D $(BUILDDIR)/dnssd-relay $(INSTALL_PREFIX)/sbin/dnssd-relay
 
 # 'setup' sets up the build directory structure the way we want
 setup:

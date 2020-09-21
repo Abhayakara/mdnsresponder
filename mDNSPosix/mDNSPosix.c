@@ -1400,7 +1400,7 @@ mDNSlocal mStatus OpenIfNotifySocket(int *pFD)
     /* Subscribe the socket to Link & IP addr notifications. */
     mDNSPlatformMemZero(&snl, sizeof snl);
     snl.nl_family = AF_NETLINK;
-    snl.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR;
+    snl.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR;
     ret = bind(sock, (struct sockaddr *) &snl, sizeof snl);
     if (0 == ret)
         *pFD = sock;

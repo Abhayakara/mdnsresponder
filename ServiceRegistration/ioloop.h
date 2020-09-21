@@ -291,6 +291,12 @@ void ioloop_file_descriptor_release_(io_t *NONNULL file_descriptor, const char *
 bool ioloop_interface_monitor_start(void);
 
 
+bool srp_load_file_data(void *NULLABLE host_context, const char *NONNULL filename, uint8_t *NONNULL buffer,
+                        uint16_t *NONNULL length, uint16_t buffer_size);
+bool srp_store_file_data(void *NULLABLE host_context, const char *NONNULL filename, uint8_t *NONNULL buffer,
+                         uint16_t length);
+
+
 // Local Variables:
 // mode: C
 // tab-width: 4

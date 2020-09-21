@@ -632,10 +632,15 @@ srp_evaluate(comm_t *connection, dns_message_t *message, message_t *raw_message)
         goto success;
     }
     ERROR("update start failed");
+    goto out;
 
 badsig:
     // True means it was intended for us, and shouldn't be forwarded.
     ret = true;
+    // We're not actually going to return this; it simply indicates that we aren't sending a fail response.
+    rcode = dns_rcode_noerror;
+    // Because we're saying this is ours, we have to free the parsed message.
+    dns_message_free(message);
 
 out:
     // free everything we allocated but (it turns out) aren't going to use
