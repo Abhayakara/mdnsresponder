@@ -56,7 +56,7 @@ int srp_set_hostname(const char *NONNULL hostname, srp_hostname_conflict_callbac
 // Called when a network state change is complete (that is, all new addresses have been saved and
 // any update to the SRP server address has been provided).   This is only needed when not using the
 // refresh mechanism.
-int srp_network_state_stable(bool *NULLABLE did_something);
+int srp_network_state_stable(void);
 
 // Delete a previously-configured SRP server address.  This should not be done during a refresh.
 int srp_delete_interface_address(uint16_t rrtype, const uint8_t *NONNULL rdata, uint16_t rdlen);
@@ -73,7 +73,7 @@ int srp_delete_server_address(uint16_t rrtype, const uint8_t *NONNULL port, cons
 int srp_start_address_refresh(void);
 
 // Call this when the address refresh is done.   This invokes srp_network_state_stable().
-int srp_finish_address_refresh(bool *NULLABLE did_something);
+int srp_finish_address_refresh(void);
 
 // Call this to deregister everything that's currently registered.  A return value other than kDNSServiceErr_NoError
 // means that there's nothing to deregister.
@@ -144,6 +144,8 @@ int srp_set_wakeup(void *NULLABLE host_context,
 
 // This is called to cancel a wakeup, and should not fail even if there is no wakeup pending.
 int srp_cancel_wakeup(void *NULLABLE host_context, void *NONNULL context);
+
+int srp_process_time(void);
 
 // Local Variables:
 // mode: C

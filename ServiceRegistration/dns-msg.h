@@ -22,6 +22,7 @@
 #define __DNS_MSG_H
 
 #include "srp.h"
+#include "srp-platform.h"
 
 #ifndef DNS_MAX_UDP_PAYLOAD
 #define DNS_MAX_UDP_PAYLOAD 1410
@@ -163,7 +164,7 @@ struct dns_edns0 {
     dns_edns0_t *NULLABLE next;
     uint16_t length;
     uint16_t type;
-    uint8_t data[0];
+    uint8_t data[256];
 };
 
 typedef struct dns_message dns_message_t;

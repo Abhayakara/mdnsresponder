@@ -34,19 +34,15 @@
 #include <openthread/platform/settings.h>
 
 
-#include "app_scheduler.h"
-#include "app_timer.h"
 #include "srp.h"
 #include "srp-thread.h"
 #include "srp-api.h"
 #include "dns_sd.h"
-#include "HAPPlatformRandomNumber.h"
 #include "dns-msg.h"
 #include "dns_sd.h"
 #include "srp-crypto.h"
 
-APP_TIMER_DEF(m_srp_timer);
-#define HAPTIME_FREQUENCY 1000ULL
+#define TIME_FREQUENCY 1000000ULL
 
 const char *key_filename = "srp.key";
 
@@ -56,7 +52,7 @@ typedef struct io_context io_context_t;
 struct io_context {
     uint64_t magic_cookie1;
     io_context_t *next;
-    HAPTime wakeup_time;
+    uint64_t wakeup_time;
     void *NONNULL srp_context;
     otSockAddr sockaddr;
     otUdpSocket sock;
@@ -84,6 +80,11 @@ validate_io_context(io_context_t **dest, void *src)
 void
 datagram_callback(void *context, otMessage *message, const otMessageInfo *messageInfo)
 {
+
+    OT_UNUSED_VARIABLE(context);
+    OT_UNUSED_VARIABLE(message);
+    OT_UNUSED_VARIABLE(messageInfo);
+
     static uint8_t *buf;
     const int buf_len = 1500;
     int length;
@@ -103,14 +104,16 @@ datagram_callback(void *context, otMessage *message, const otMessageInfo *messag
     }
 }
 
-static void wakeup_callback(void *context);
-
 static void
 note_wakeup(const char *what, void *at, uint64_t when)
 {
+    OT_UNUSED_VARIABLE(what);
+    OT_UNUSED_VARIABLE(at);
+    OT_UNUSED_VARIABLE(when);
+
 #ifdef VERBOSE_DEBUG_MESSAGES
-    int microseconds = (int)(when % HAPTIME_FREQUENCY);
-    HAPTime seconds = when / HAPTIME_FREQUENCY;
+    int microseconds = (int)(when % TIME_FREQUENCY);
+    int seconds = when / TIME_FREQUENCY;
     int minute = (int)((seconds / 60) % 60);
     int hour = (int)((seconds / 3600) % (7 * 24));
     int second = (int)(seconds % 60);
@@ -119,64 +122,37 @@ note_wakeup(const char *what, void *at, uint64_t when)
 #endif
 }
 
-static void
-compute_wakeup_time(HAPTime now)
+// TODO:  SRP should be running a timer.  The timer is scheduled in srp_set_wakeup and this is
+//        its callback.  OT does not expose its timer api, so for now this demo asks the client to 
+//        periodically call this function where we check to see if the wakeup time has been met.
+int srp_process_time()
 {
     io_context_t *io_context;
-    HAPTime next = 0;
-    uint32_t err;
-
-    for (io_context = io_contexts; io_context; io_context = io_context->next) {
-        if (next == 0 || (io_context->wakeup_time != 0 && io_context->wakeup_time < next)) {
-            next = io_context->wakeup_time;
-        }
-    }
-
-    // If we don't have a wakeup to schedule, wake up anyway in ten seconds.
-    if (next == 0) {
-        next = now + 10 * HAPTIME_FREQUENCY;
-    }
-    note_wakeup("next wakeup", NULL, next);
-    if (next != 0) {
-        int milliseconds;
-        if (next <= now) {
-            milliseconds = 1;
-        } else {
-            milliseconds = (int)((next - now) / (HAPTIME_FREQUENCY / 1000));
-        }
-        err = app_timer_start(m_srp_timer, APP_TIMER_TICKS(milliseconds), NULL);
-        if (err != 0) {
-            ERROR("app_timer_start returned %lu", err);
-        }
-    }
-}
-
-static void
-wakeup_callback(void *context)
-{
-    io_context_t *io_context;
-    HAPTime now = HAPPlatformClockGetCurrent(), next = 0;
+    uint64_t now = otPlatTimeGet(), next = 0;
     bool more;
 
-    note_wakeup("     wakeup", NULL, now);
+    static int locCount = 0;
+
     do {
         more = false;
         for (io_context = io_contexts; io_context; io_context = io_context->next) {
-            if (io_context->wakeup_time != 0 && io_context->wakeup_time < now) {
+            if (io_context->wakeup_time != 0 && io_context->wakeup_time <= now) {
                 more = true;
                 note_wakeup("io wakeup", io_context, io_context->wakeup_time);
                 io_context->wakeup_time = 0;
                 io_context->wakeup_callback(io_context->srp_context);
                 break;
             }
-            note_wakeup("no wakeup", io_context, io_context->wakeup_time);
             if (next == 0 || (io_context->wakeup_time != 0 && io_context->wakeup_time < next))
             {
                 next = io_context->wakeup_time;
             }
         }
     } while (more);
-    compute_wakeup_time(now);
+
+    locCount++;
+
+    return kDNSServiceErr_NoError;
 }
 
 int
@@ -184,6 +160,8 @@ srp_deactivate_udp_context(void *host_context, void *in_context)
 {
     io_context_t *io_context, **p_io_contexts;
     int err;
+
+    OT_UNUSED_VARIABLE(host_context);
 
     err = validate_io_context(&io_context, in_context);
     if (err == kDNSServiceErr_NoError) {
@@ -199,7 +177,7 @@ srp_deactivate_udp_context(void *host_context, void *in_context)
         *p_io_contexts = io_context->next;
         io_context->wakeup_time = 0;
         if (io_context->sock_active) {
-            otUdpClose(&io_context->sock);
+            otUdpClose(otThreadInstance, &io_context->sock);
         }
         free(io_context);
     }
@@ -211,9 +189,7 @@ srp_connect_udp(void *context, const uint8_t *port, uint16_t address_type, const
 {
     io_context_t *io_context;
     int err, oterr;
-
     err = validate_io_context(&io_context, context);
-
     if (err == kDNSServiceErr_NoError) {
         if (address_type != dns_rrtype_aaaa || addrlen != 16) {
             ERROR("srp_make_udp_context: invalid address");
@@ -224,16 +200,14 @@ srp_connect_udp(void *context, const uint8_t *port, uint16_t address_type, const
 #ifdef OT_NETIF_INTERFACE_ID_THREAD
         io_context->sockaddr.mScopeId = OT_NETIF_INTERFACE_ID_THREAD;
 #endif
-
         oterr = otUdpOpen(otThreadInstance, &io_context->sock, datagram_callback, io_context);
         if (oterr != OT_ERROR_NONE) {
             ERROR("srp_make_udp_context: otUdpOpen returned %d", oterr);
             return kDNSServiceErr_Unknown;
         }
-
-        oterr = otUdpConnect(&io_context->sock, &io_context->sockaddr);
+        oterr = otUdpConnect(otThreadInstance, &io_context->sock, &io_context->sockaddr);
         if (oterr != OT_ERROR_NONE) {
-            otUdpClose(&io_context->sock);
+            otUdpClose(otThreadInstance, &io_context->sock);
             ERROR("srp_make_udp_context: otUdpConnect returned %d", oterr);
             return kDNSServiceErr_Unknown;
         }
@@ -251,7 +225,7 @@ srp_disconnect_udp(void *context)
 
     err = validate_io_context(&io_context, context);
     if (err == kDNSServiceErr_NoError && io_context->sock_active) {
-        otUdpClose(&io_context->sock);
+        otUdpClose(otThreadInstance, &io_context->sock);
         io_context->sock_active = false;
     }
     return err;
@@ -261,6 +235,9 @@ int
 srp_make_udp_context(void *host_context, void **p_context, srp_datagram_callback_t callback, void *context)
 {
     io_context_t *io_context = calloc(1, sizeof *io_context);
+
+    OT_UNUSED_VARIABLE(host_context);
+
     if (io_context == NULL) {
         ERROR("srp_make_udp_context: no memory");
         return kDNSServiceErr_NoMemory;
@@ -280,15 +257,20 @@ srp_set_wakeup(void *host_context, void *context, int milliseconds, srp_wakeup_c
 {
     int err;
     io_context_t *io_context;
-    HAPTime now;
+    uint64_t now;
+
+    OT_UNUSED_VARIABLE(host_context);
 
     err = validate_io_context(&io_context, context);
     if (err == kDNSServiceErr_NoError) {
-        now = HAPPlatformClockGetCurrent();
-        io_context->wakeup_time = now + milliseconds * (HAPTIME_FREQUENCY / 1000);
+        now = otPlatTimeGet();
+        io_context->wakeup_time = now + milliseconds * (TIME_FREQUENCY / 1000);
         io_context->wakeup_callback = callback;
         INFO("srp_set_wakeup: %llu (%llu + %dms)", io_context->wakeup_time, now, milliseconds);
-        compute_wakeup_time(now);
+
+        // TODO:  This is where we should be setting our timer that would trigger srp_process_time.
+        //        Unfortunately OT does not expose a timer API so instead we ask that the client
+        //        periodically call srp_process_time to fake it.
     }
     return err;
 }
@@ -297,6 +279,10 @@ int
 srp_cancel_wakeup(void *host_context, void *context)
 {
     int err;
+
+    OT_UNUSED_VARIABLE(host_context);
+    OT_UNUSED_VARIABLE(context);
+
     io_context_t *io_context;
 
     err = validate_io_context(&io_context, context);
@@ -316,6 +302,9 @@ srp_send_datagram(void *host_context, void *context, void *payload, size_t messa
     otMessage *   message = NULL;
     uint8_t *ap;
 
+    OT_UNUSED_VARIABLE(host_context);
+
+
 #ifdef VERBOSE_DEBUG_MESSAGES
     int i, j;
     char buf[80], *bufp;
@@ -331,9 +320,24 @@ srp_send_datagram(void *host_context, void *context, void *payload, size_t messa
 #endif
         messageInfo.mPeerPort    = io_context->sockaddr.mPort;
         messageInfo.mPeerAddr    = io_context->sockaddr.mAddress;
-        ap = (uint8_t *)&io_context->sockaddr.mAddress;
-        SEGMENTED_IPv6_ADDR_GEN_SRP(ap, ap_buf);
-        INFO("Sending to " PRI_SEGMENTED_IPv6_ADDR_SRP " port %d", SEGMENTED_IPv6_ADDR_PARAM_SRP(ap, ap_buf),
+        ap = (uint8_t *)&io_context->sockaddr.mAddress;        
+        INFO("Sending to %02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x port %d",
+             ap[0],
+             ap[1],
+             ap[2],
+             ap[3],
+             ap[4],
+             ap[5],
+             ap[6],
+             ap[7],
+             ap[8],
+             ap[9],
+             ap[10],
+             ap[11],
+             ap[12],
+             ap[13],
+             ap[14],
+             ap[15],
              io_context->sockaddr.mPort);
 #ifdef VERBOSE_DEBUG_MESSAGES
         for (i = 0; i < message_length; i += 32) {
@@ -364,7 +368,7 @@ srp_send_datagram(void *host_context, void *context, void *payload, size_t messa
             return kDNSServiceErr_NoMemory;
         }
 
-        error = otUdpSend(&io_context->sock, message, &messageInfo);
+        error = otUdpSend(otThreadInstance, &io_context->sock, message, &messageInfo);
         if (error != OT_ERROR_NONE) {
             ERROR("srp_send_datagram: otUdpSend returned %d", error);
             return kDNSServiceErr_Unknown;
@@ -374,11 +378,19 @@ srp_send_datagram(void *host_context, void *context, void *payload, size_t messa
 }
 
 #define KEY_ID 1000
+#define SERVER_ID 2000
 int
 srp_load_key_data(void *host_context, const char *key_name,
                   uint8_t *buffer, uint16_t *length, uint16_t buffer_size)
 {
-#ifndef DEBUG_CONFLICTS
+
+    OT_UNUSED_VARIABLE(host_context);
+    OT_UNUSED_VARIABLE(key_name);
+    OT_UNUSED_VARIABLE(buffer);
+    OT_UNUSED_VARIABLE(length);
+    OT_UNUSED_VARIABLE(buffer_size);
+
+#if OT_PLAT_SETTINGS_ENABLED
     otError err;
     uint16_t rlength = buffer_size;
     // Note that at present we ignore the key name: we are only going to have one host key on an
@@ -393,30 +405,139 @@ srp_load_key_data(void *host_context, const char *key_name,
 #else
         return kDNSServiceErr_NoSuchKey;
 #endif
+
 }
 
 int
 srp_store_key_data(void *host_context, const char *name, uint8_t *buffer, uint16_t length)
 {
+
+    OT_UNUSED_VARIABLE(host_context);
+    OT_UNUSED_VARIABLE(name);
+    OT_UNUSED_VARIABLE(buffer);
+    OT_UNUSED_VARIABLE(length);
+
+#if OT_PLAT_SETTINGS_ENABLED
+
     otError err;
     err = otPlatSettingsAdd(otThreadInstance, KEY_ID, buffer, length);
     if (err != OT_ERROR_NONE) {
         ERROR("Unable to store key (length %d): %d", length, err);
         return kDNSServiceErr_Unknown;
     }
+#endif
     return kDNSServiceErr_NoError;
 }
 
 int
 srp_reset_key(const char *name, void *host_context)
 {
-    otPlatSettingsDelete(otThreadInstance, KEY_ID);
+    OT_UNUSED_VARIABLE(name);
+    OT_UNUSED_VARIABLE(host_context);
+
+#if OT_PLAT_SETTINGS_ENABLED
+    otPlatSettingsDelete(otThreadInstance, KEY_ID, -1);
+#endif
+    return kDNSServiceErr_NoError;
 }
+
+typedef struct{
+    uint16_t rrtype;
+    uint8_t address[16];
+    uint16_t port;
+} SrpServerData;
+
+bool
+srp_get_last_server(uint16_t *NONNULL rrtype, uint8_t *NONNULL rdata, uint16_t rdlim,
+                    uint8_t *NONNULL port, void *NULLABLE host_context)
+{
+    OT_UNUSED_VARIABLE(rrtype);
+    OT_UNUSED_VARIABLE(rdata);
+    OT_UNUSED_VARIABLE(rdlim);
+    OT_UNUSED_VARIABLE(port);
+    OT_UNUSED_VARIABLE(host_context);
+
+
+#if OT_PLAT_SETTINGS_ENABLED
+
+    SrpServerData data;
+    uint16_t sizeFound = sizeof(data);
+
+    otError err = otPlatSettingsGet(otThreadInstance, 
+                                    SERVER_ID, 
+                                    0, 
+                                    (uint8_t*)(&data), 
+                                    &sizeFound);
+    if (err != OT_ERROR_NONE ) {        
+        return false;
+    }
+
+    size_t addrlen = sizeof(data.address);
+    if ( rdlim < addrlen)
+    {
+        addrlen = rdlim;
+    }
+
+    *rrtype = data.rrtype;
+    memcpy(rdata, data.address, addrlen);
+    *port = data.port;
+    return true;
+#else
+    return false;
+#endif
+}
+
+
+bool
+srp_save_last_server(uint16_t rrtype, uint8_t *NONNULL rdata, uint16_t rdlength,
+                     uint8_t *NONNULL port, void *NULLABLE host_context)
+{
+    OT_UNUSED_VARIABLE(rrtype);
+    OT_UNUSED_VARIABLE(rdata);
+    OT_UNUSED_VARIABLE(rdlength);
+    OT_UNUSED_VARIABLE(port);
+    OT_UNUSED_VARIABLE(host_context);
+
+#if OT_PLAT_SETTINGS_ENABLED
+
+    SrpServerData data;
+    data.rrtype = rrtype;
+
+    if ( rdlength > sizeof(data.address) )
+    {
+        return false;
+    }
+    memcpy( data.address, rdata, rdlength);
+    data.port = *port;
+
+    otError err = otPlatSettingsSet(
+        otThreadInstance,
+        SERVER_ID,
+        (uint8_t*)(&data),
+        sizeof(data));
+
+    if (err != OT_ERROR_NONE) {
+        ERROR("Unable to store server %d", err);
+        return false;
+    }
+#endif
+    return true;
+}
+
+
 
 void
 register_callback(DNSServiceRef sdRef, DNSServiceFlags flags, DNSServiceErrorType errorCode,
                   const char *name, const char *regtype, const char *domain, void *context)
 {
+    OT_UNUSED_VARIABLE(sdRef);
+    OT_UNUSED_VARIABLE(flags);
+    OT_UNUSED_VARIABLE(errorCode);
+    OT_UNUSED_VARIABLE(name);
+    OT_UNUSED_VARIABLE(regtype);
+    OT_UNUSED_VARIABLE(domain);
+    OT_UNUSED_VARIABLE(context);
+
     INFO("Register Reply: %ld " PRI_S_SRP " " PRI_S_SRP " " PRI_S_SRP "\n", errorCode, name == NULL ? "<NULL>" : name,
          regtype == NULL ? "<NULL>" : regtype, domain == NULL ? "<NULL>" : domain);
 }
@@ -424,22 +545,25 @@ register_callback(DNSServiceRef sdRef, DNSServiceFlags flags, DNSServiceErrorTyp
 void
 conflict_callback(const char *hostname)
 {
+    OT_UNUSED_VARIABLE(hostname);
     ERROR("Host name conflict: %s", hostname);
 }
 
 int
 srp_thread_init(otInstance *instance)
 {
-    uint32_t app_err;
+//    uint32_t app_err;
     DEBUG("In srp_thread_init().");
     otThreadInstance = instance;
     srp_host_init(otThreadInstance);
 
-    app_err = app_timer_create(&m_srp_timer, APP_TIMER_MODE_SINGLE_SHOT, wakeup_callback);
-    if (app_err != 0) {
-        ERROR("app_timer_create returned %lu", app_err);
-        return kDNSServiceErr_Unknown;
-    }
+    // TODO: Should be starting the timer here.
+
+//    app_err = app_timer_create(&m_srp_timer, APP_TIMER_MODE_SINGLE_SHOT, wakeup_callback);
+//    if (app_err != 0) {
+//        ERROR("app_timer_create returned %lu", app_err);
+//        return kDNSServiceErr_Unknown;
+//    }
     return kDNSServiceErr_NoError;
 }
 
@@ -447,12 +571,17 @@ int
 srp_thread_shutdown(otInstance *instance)
 {
     INFO("In srp_thread_shutdown().");
-    uint32_t app_err;
-    app_err = app_timer_stop(m_srp_timer);
-    if (app_err != 0) {
-        ERROR("app_timer_stop returned %lu", app_err);
-        return kDNSServiceErr_Unknown;
-    }
+
+    OT_UNUSED_VARIABLE(instance);
+
+    // TODO:  Should be stopping the timer here.
+
+//    uint32_t app_err;
+//    app_err = app_timer_stop(m_srp_timer);
+//    if (app_err != 0) {
+//        ERROR("app_timer_stop returned %lu", app_err);
+//        return kDNSServiceErr_Unknown;
+//    }
     return kDNSServiceErr_NoError;
 }
 

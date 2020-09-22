@@ -291,8 +291,6 @@ int ctiRetrievePrefixList(cti_connection_t connection, int UNUSED event)
             }
             break;
         }
-        // DJC Note:  Shouldn't be possible for the items in the Thread Network data to have changed
-        // between above count and now, but I'm paranoid and assumptions rot over time.
         uint16_t flags = 0;
         flags |= config.mDefaultRoute ? 0 : kCTIFlag_NCP;
         flags |= config.mStable ? kCTIFlag_Stable : 0;

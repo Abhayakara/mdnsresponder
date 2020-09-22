@@ -29,9 +29,6 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
-#ifndef THREAD_DEVKIT_ADK
-#include <arpa/inet.h>
-#endif
 #include <stdlib.h>
 
 #include "srp.h"
@@ -323,46 +320,6 @@ dns_rdlength_end_(dns_towire_state_t *NONNULL txn, int line)
         txn->p_rdlength = NULL;
     }
 }
-
-#ifndef THREAD_DEVKIT_ADK
-void
-dns_rdata_a_to_wire_(dns_towire_state_t *NONNULL txn, const char *NONNULL ip_address, int line)
-{
-    if (!txn->error) {
-        if (txn->p + 4 >= txn->lim) {
-            txn->error = ENOBUFS;
-            txn->truncated = true;
-            txn->line = line;
-            return;
-        }
-        if (!inet_pton(AF_INET, ip_address, txn->p)) {
-            txn->error = EINVAL;
-            txn->line = line;
-            return;
-        }
-        txn->p += 4;
-    }
-}
-
-void
-dns_rdata_aaaa_to_wire_(dns_towire_state_t *NONNULL txn, const char *NONNULL ip_address, int line)
-{
-    if (!txn->error) {
-        if (txn->p + 16 >= txn->lim) {
-            txn->error = ENOBUFS;
-            txn->truncated = true;
-            txn->line = line;
-            return;
-        }
-        if (!inet_pton(AF_INET6, ip_address, txn->p)) {
-            txn->error = EINVAL;
-            txn->line = line;
-            return;
-        }
-        txn->p += 16;
-    }
-}
-#endif
 
 uint16_t
 dns_rdata_key_to_wire_(dns_towire_state_t *NONNULL txn, unsigned key_type, unsigned name_type,

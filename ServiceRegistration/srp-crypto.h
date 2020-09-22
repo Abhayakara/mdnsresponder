@@ -24,9 +24,8 @@
 #define __SRP_CRYPTO_H
 
 #include "srp.h"
-
+#include "dns-msg.h"
 // Anonymous key structure, depends on the target.
-typedef struct srp_key srp_key_t;
 typedef struct hmac_key hmac_key_t;
 struct hmac_key {
     int algorithm;
