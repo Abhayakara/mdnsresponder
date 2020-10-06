@@ -461,6 +461,26 @@ mdns_dns_service_manager_get_count(mdns_dns_service_manager_t manager);
 
 /*!
  *	@brief
+ *		Performs tasks necessary for a DNS service manager to prepare for system sleep.
+ *
+ *	@param manager
+ *		The DNS service manager.
+ */
+void
+mdns_dns_service_manager_handle_sleep(mdns_dns_service_manager_t manager);
+
+/*!
+ *	@brief
+ *		Performs tasks necessary for a DNS service manager to prepare for system wake.
+ *
+ *	@param manager
+ *		The DNS service manager.
+ */
+void
+mdns_dns_service_manager_handle_wake(mdns_dns_service_manager_t manager);
+
+/*!
+ *	@brief
  *		Sets a DNS service's user-defined context.
  *
  *	@param service
@@ -487,18 +507,8 @@ mdns_dns_service_set_context(mdns_dns_service_t service, void *context);
  *	@result
  *		Returns the last context set with mdns_dns_service_set_context().
  */
-void * _Nonnull
+void * _Nullable
 mdns_dns_service_get_context(mdns_dns_service_t service);
-
-/*!
- *	@brief
- *		The type for a function that finalizes a user-defined context.
- *
- *	@param context
- *		The user-defined context.
- */
-typedef void
-(*mdns_context_finalizer_t)(void *context);
 
 /*!
  *	@brief

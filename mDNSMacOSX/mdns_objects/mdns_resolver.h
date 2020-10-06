@@ -969,6 +969,56 @@ mdns_querier_has_concluded(mdns_querier_t querier);
 uint32_t
 mdns_querier_get_user_id(mdns_querier_t querier);
 
+/*!
+ *	@brief
+ *		Sets a querier's user-defined context.
+ *
+ *	@param querier
+ *		The querier.
+ *
+ *	@param context
+ *		The user-defined context.
+ *
+ *	@discussion
+ *		The last context set with this function can be retrieved with mdns_querier_get_context().
+ *
+ *		A querier's context is NULL by default.
+ */
+void
+mdns_querier_set_context(mdns_querier_t querier, void *context);
+
+/*!
+ *	@brief
+ *		Gets a querier's user-defined context.
+ *
+ *	@param querier
+ *		The querier.
+ *
+ *	@result
+ *		Returns the last context set with mdns_querier_set_context().
+ */
+void * _Nullable
+mdns_querier_get_context(mdns_querier_t querier);
+
+/*!
+ *	@brief
+ *		Sets a querier's context finalizer function.
+ *
+ *	@param querier
+ *		The querier.
+ *
+ *	@param finalizer
+ *		The finalizer.
+ *
+ *	@discussion
+ *		If a querier's context finalizer is not NULL and the querier's context, which can be set with
+ *		mdns_querier_set_context(), is not NULL when the querier's last reference is released, then the
+ *		finalizer will be invoked exactly once using the querier's context as an argument. The finalizer will be
+ *		invoked under no other conditions.
+ */
+void
+mdns_querier_set_context_finalizer(mdns_querier_t querier, mdns_context_finalizer_t _Nullable finalizer);
+
 __END_DECLS
 
 #define mdns_querier_forget(X)	mdns_forget_with_invalidation(X, querier)

@@ -14,13 +14,16 @@
  * limitations under the License.
  */
 
-#ifndef __MDNS_SET_H__
-#define __MDNS_SET_H__
+#ifndef __MDNS_SET_IMP_H__
+#define __MDNS_SET_IMP_H__
 
-#include "mdns_base.h"
-#include "mdns_object.h"
+#include "mdns_set.h"
 
-MDNS_DECL(set);
+/*!
+ *	@brief
+ *		A pointer to an mdns_set_imp object, which implements the core functionality of an mdns_set object.
+ */
+typedef struct mdns_set_imp_s *	mdns_set_imp_t;
 
 MDNS_ASSUME_NONNULL_BEGIN
 
@@ -35,10 +38,23 @@ __BEGIN_DECLS
  *
  *	@result
  *		A new set object or NULL if there was a lack of resources.
+ *
+ *	@discussion
+ *		This object is meant for implementing the core functionality of an mdns_set object.
  */
-MDNS_RETURNS_RETAINED MDNS_WARN_RESULT
-mdns_set_t _Nullable
-mdns_set_create(uint32_t initial_capacity);
+CF_RETURNS_RETAINED MDNS_WARN_RESULT
+mdns_set_imp_t _Nullable
+mdns_set_imp_create(uint32_t initial_capacity);
+
+/*!
+ *	@brief
+ *		Releases a reference to a set.
+ *
+ *	@param set
+ *		The set.
+ */
+void
+mdns_set_imp_release(mdns_set_imp_t CF_RELEASES_ARGUMENT set);
 
 /*!
  *	@brief
@@ -51,7 +67,7 @@ mdns_set_create(uint32_t initial_capacity);
  *		The object.
  */
 void
-mdns_set_add(mdns_set_t set, mdns_any_t object);
+mdns_set_imp_add(mdns_set_imp_t set, mdns_object_t object);
 
 /*!
  *	@brief
@@ -64,7 +80,7 @@ mdns_set_add(mdns_set_t set, mdns_any_t object);
  *		The object.
  */
 void
-mdns_set_remove(mdns_set_t set, mdns_any_t object);
+mdns_set_imp_remove(mdns_set_imp_t set, mdns_object_t object);
 
 /*!
  *	@brief
@@ -74,20 +90,7 @@ mdns_set_remove(mdns_set_t set, mdns_any_t object);
  *		The set.
  */
 size_t
-mdns_set_get_count(mdns_set_t set);
-
-/*!
- *	@brief
- *		The type for a block that handles a member object when iterating over a set's members.
- *
- *	@param object
- *		The member object.
- *
- *	@result
- *		If true, then iteration will stop prematurely. If false, then iteration will continue.
- */
-typedef bool
-(^mdns_set_applier_t)(mdns_object_t object);
+mdns_set_imp_get_count(mdns_set_imp_t set);
 
 /*!
  *	@brief
@@ -100,10 +103,10 @@ typedef bool
  *		Block to invoke for each member object.
  */
 void
-mdns_set_iterate(mdns_set_t set, mdns_set_applier_t applier);
+mdns_set_imp_iterate(mdns_set_imp_t set, mdns_set_applier_t applier);
 
 __END_DECLS
 
 MDNS_ASSUME_NONNULL_END
 
-#endif	// __MDNS_SET_H__
+#endif	// __MDNS_SET_IMP_H__

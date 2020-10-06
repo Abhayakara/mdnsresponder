@@ -70,6 +70,7 @@
        (global-name "com.apple.webcontentfilter.dns")
        (global-name "com.apple.server.bluetooth")
        (global-name "com.apple.server.bluetooth.le.att.xpc")
+       (global-name "com.apple.server.bluetooth.general.xpc")
        (global-name "com.apple.awacs")
        (global-name "com.apple.securityd")
        (global-name "com.apple.wifi.manager")

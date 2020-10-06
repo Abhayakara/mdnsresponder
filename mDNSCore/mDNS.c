@@ -34,6 +34,12 @@
 #include <bsm/libbsm.h>
 #endif
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, SYMPTOMS)
+#include "SymptomReporter.h"
+#include "mdns_symptoms.h"
+#include <os/feature_private.h>
+#endif
+
 #if MDNSRESPONDER_SUPPORTS(APPLE, CACHE_ANALYTICS)
 #include "dnssd_analytics.h"
 #endif
@@ -6856,6 +6862,9 @@ mDNSexport void mDNSCoreMachineSleep(mDNS *const m, mDNSBool sleep)
             m->DelaySleep = 0;
             m->SleepLimit = NonZeroTime(m->timenow + mDNSPlatformOneSecond * 10);
             m->mDNSStats.Sleeps++;
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+            Querier_HandleSleep();
+#endif
             BeginSleepProcessing(m);
         }
 
@@ -6901,6 +6910,9 @@ mDNSexport void mDNSCoreMachineSleep(mDNS *const m, mDNSBool sleep)
         // ... and the same for NextSPSAttempt
         for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next)) intf->NextSPSAttempt = -1;
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+        Querier_HandleWake();
+#endif
         // Restart unicast and multicast queries
         mDNSCoreRestartQueries(m);
 
@@ -11814,6 +11826,40 @@ mDNSexport mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const qu
     question->TargetQID = zeroID;
 #endif
     debugf("mDNS_StartQuery_internal: %##s (%s)", question->qname.c, DNSTypeName(question->qtype));
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, SYMPTOMS)
+    if (os_feature_enabled(symptomsd, networking_transparency)  &&
+        !mDNSOpaque16IsZero(question->TargetQID)                &&
+        question->qclass == kDNSClass_IN                        &&
+        !LocalOnlyOrP2PInterface(question->InterfaceID)         &&
+        (question->qtype == kDNSType_AAAA   ||
+         question->qtype == kDNSType_A      ||
+         question->qtype == kDNSType_CNAME))
+    {
+        char qNameStr[MAX_ESCAPED_DOMAIN_NAME];
+        ConvertDomainNameToCString(&question->qname, qNameStr);
+        if (audit_token_to_pid(question->delegateAuditToken) != 0)
+        {
+            mdns_symptoms_report_resolving_delegated_audit_token_symptom(qNameStr, question->CNAMEReferrals, question->peerAuditToken, question->inAppBrowserRequest, question->request_id, &question->delegateAuditToken);
+        }
+        else if (question->pid)
+        {
+            pid_t delegate_pid = (audit_token_to_pid(question->peerAuditToken) == question->pid) ? 0 : question->pid;
+            if (delegate_pid)
+            {
+                mdns_symptoms_report_resolving_delegated_pid_symptom(qNameStr, question->CNAMEReferrals, question->peerAuditToken, question->inAppBrowserRequest, question->request_id, delegate_pid);
+            }
+            else
+            {
+                mdns_symptoms_report_resolving_symptom(qNameStr, question->CNAMEReferrals, question->peerAuditToken, question->inAppBrowserRequest, question->request_id);
+            }
+        }
+        else
+        {
+            mdns_symptoms_report_resolving_delegated_uuid_symptom(qNameStr, question->CNAMEReferrals, question->peerAuditToken, question->inAppBrowserRequest, question->request_id, question->uuid);
+        }
+    }
+#endif
 
     // Note: It important that new questions are appended at the *end* of the list, not prepended at the start
     q = &m->Questions;

@@ -27,7 +27,11 @@
 #endif
 
 #define MIN_DELAY_BETWEEN_RAS 4000
+#define MSEC_PER_SEC (NSEC_PER_SEC / NSEC_PER_MSEC)
+#define MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE 600 * MSEC_PER_SEC
 
+#define NSEC_PER_SEC  1000000000ull
+#define NSEC_PER_MSEC    1000000ull
 
 #ifndef RTR_SOLICITATION_INTERVAL
 #define RTR_SOLICITATION_INTERVAL       4       /* 4sec */
@@ -99,6 +103,9 @@ struct interface {
 
     // Number of IPv4 addresses configured on link.
     int num_ipv4_addresses;
+
+    // Number of beacons sent. After the first three, the inter-beacon interval goes up.
+    int num_beacons_sent;
 
     // The interface link layer address, if known.
     uint8_t link_layer[6];
@@ -189,6 +196,9 @@ struct icmp_message {
     icmp_message_t *NULLABLE next;
     interface_t *NULLABLE interface;
     icmp_option_t *NULLABLE options;
+    bool new_router;                // If this router information is a newly recevied one.
+    bool received_time_already_adjusted;    // if the received time of the message is already adjusted by
+                                                    // vicarious mode
     struct in6_addr source;
     struct in6_addr destination;
 
@@ -196,15 +206,15 @@ struct icmp_message {
 
     uint32_t reachable_time;
     uint32_t retransmission_timer;
-    uint8_t cur_hop_limit;         // Current hop limit for Router Advertisement messages.
+    uint8_t cur_hop_limit;          // Current hop limit for Router Advertisement messages.
     uint8_t flags;
     uint8_t type;
     uint8_t code;
-    uint16_t checksum;             // We hope the kernel figures this out for us.
+    uint16_t checksum;              // We hope the kernel figures this out for us.
     uint16_t router_lifetime;
 
     int num_options;
-    int hop_limit;                 // Hop limit provided by the kernel, must be 255.
+    int hop_limit;                  // Hop limit provided by the kernel, must be 255.
 };
 
 void ula_generate(void);

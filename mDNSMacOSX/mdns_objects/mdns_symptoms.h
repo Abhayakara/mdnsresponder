@@ -39,6 +39,22 @@ void
 mdns_symptoms_report_responsive_server(const struct sockaddr *address);
 
 void
+mdns_symptoms_report_resolving_symptom(const char *domain, uint32_t cname_count, audit_token_t token,
+	bool in_app_browser_request, uint32_t request_id);
+
+void
+mdns_symptoms_report_resolving_delegated_pid_symptom(const char *domain, uint32_t cname_count, audit_token_t token,
+	bool in_app_browser_request, uint32_t request_id, pid_t delegate_pid);
+
+void
+mdns_symptoms_report_resolving_delegated_uuid_symptom(const char *domain, uint32_t cname_count, audit_token_t token,
+	bool in_app_browser_request, uint32_t request_id, const uuid_t _Nonnull delegate_uuid);
+
+void
+mdns_symptoms_report_resolving_delegated_audit_token_symptom(const char *domain, uint32_t cname_count,
+	audit_token_t token, bool in_app_browser_request, uint32_t request_id, const audit_token_t *delegate_token);
+
+void
 mdns_symptoms_report_encrypted_dns_connection_failure(const char *host);
 
 MDNS_ASSUME_NONNULL_END

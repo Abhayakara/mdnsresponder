@@ -24,13 +24,7 @@
 #ifndef LINUX
 #include <netinet/in_var.h>
 #include <net/if_dl.h>
-#include <asm/types.h>
-#include <linux/netlink.h>
-#include <linux/rtnetlink.h>
-#else
-#include <net/route.h>
-#include <net/if.h>
-#endif // LINUX
+#endif
 #include <sys/ioctl.h>
 #include <errno.h>
 #include <ifaddrs.h>
@@ -165,9 +159,20 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
                     if (ifp->ifa_addr->sa_family == AF_INET) {
                         nif->addr.sin = *((struct sockaddr_in *)ifp->ifa_addr);
                         nif->mask.sin = *((struct sockaddr_in *)ifp->ifa_netmask);
+
+                        IPv4_ADDR_GEN_SRP(&nif->mask.sin.sin_addr.s_addr, __new_interface_ipv4_addr);
+                        INFO("ioloop_map_interface_addresses: new IPv4 interface address added - ifname: " PUB_S_SRP
+                             ", addr: " PRI_IPv4_ADDR_SRP, nif->name,
+                             IPv4_ADDR_PARAM_SRP(&nif->mask.sin.sin_addr.s_addr, __new_interface_ipv4_addr));
                     } else if (ifp->ifa_addr->sa_family == AF_INET6) {
                         nif->addr.sin6 = *((struct sockaddr_in6 *)ifp->ifa_addr);
                         nif->mask.sin6 = *((struct sockaddr_in6 *)ifp->ifa_netmask);
+
+                        SEGMENTED_IPv6_ADDR_GEN_SRP(nif->addr.sin6.sin6_addr.s6_addr, __new_interface_ipv6_addr);
+                        INFO("ioloop_map_interface_addresses: new IPv6 interface address added - ifname: " PUB_S_SRP
+                             ", addr: " PRI_SEGMENTED_IPv6_ADDR_SRP, nif->name,
+                             SEGMENTED_IPv6_ADDR_PARAM_SRP(nif->addr.sin6.sin6_addr.s6_addr,
+                                                           __new_interface_ipv6_addr));
                     } else {
 #ifndef LINUX
                         struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifp->ifa_addr;
@@ -364,7 +369,6 @@ get_num_fds(void)
     return num;
 }
 #endif // DEBUG_VERBOSE
-
 
 // Local Variables:
 // mode: C

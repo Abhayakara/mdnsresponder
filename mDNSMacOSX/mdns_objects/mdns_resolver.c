@@ -602,6 +602,8 @@ struct mdns_querier_s {
 	char *							log_label;				// User-specified UTF-8 prefix label to use for logging.
 	mdns_message_t					response;				// Final DNS response.
 	mdns_message_t					bad_rcode_response;		// DNS response received with a bad RCODE.
+	void *							context;				// User-defined context.
+	mdns_context_finalizer_t		context_finalizer;		// Finalizer for user-defined context.
 #if MDNS_RESOLVER_PROBLEMATIC_QTYPE_WORKAROUND
 	mdns_query_message_t			test_query;				// Test query to send while sending problematic QTYPE query.
 	uint32_t						test_send_count;		// Total number of test queries sent.
@@ -4080,6 +4082,30 @@ mdns_querier_get_user_id(const mdns_querier_t me)
 }
 
 //======================================================================================================================
+
+void
+mdns_querier_set_context(const mdns_querier_t me, void * const context)
+{
+	me->context = context;
+}
+
+//======================================================================================================================
+
+void *
+mdns_querier_get_context(const mdns_querier_t me)
+{
+	return me->context;
+}
+
+//======================================================================================================================
+
+void
+mdns_querier_set_context_finalizer(const mdns_querier_t me, const mdns_context_finalizer_t finalizer)
+{
+	me->context_finalizer = finalizer;
+}
+
+//======================================================================================================================
 // MARK: - Querier Private Methods
 
 static void
@@ -4095,6 +4121,12 @@ _mdns_querier_finalize(mdns_querier_t me)
 #if MDNS_RESOLVER_PROBLEMATIC_QTYPE_WORKAROUND
 	mdns_forget(&me->test_query);
 #endif
+	if (me->context) {
+		if (me->context_finalizer) {
+			me->context_finalizer(me->context);
+		}
+		me->context = NULL;
+	}
 }
 
 //======================================================================================================================

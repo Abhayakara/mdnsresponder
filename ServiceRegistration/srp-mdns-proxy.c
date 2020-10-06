@@ -892,27 +892,6 @@ register_instance(adv_instance_t *instance)
     return true;
 }
 
-#ifdef UNUSED_FUNCTIONS
-// When an update fails on some record, abandon_update is called to stop advertising the other records
-// that were proposed in the update.  The state associated with the update is then freed.  The caller is
-// responsible for sending the result back to the SRP client.   If anything was deleted by the update, it's
-// also abandoned, which is somewhat problematic.
-static void
-abandon_update(adv_host_t *host)
-{
-    (void)host;
-}
-
-// When a registration that's been successfully added in the past is attempted, and fails in a way
-// that indicates a conflict or unrecoverable error, we have to abandon it.  abandon_registration
-// takes care of that.
-static void
-abandon_registration(adv_host_t *host)
-{
-    (void)host;
-}
-#endif
-
 static void
 start_service_updates(adv_host_t *host)
 {

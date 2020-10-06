@@ -129,6 +129,7 @@ struct mdns_dns_service_s {
 	bool						defuncting;			// True if the service becoming defunct is imminent.
 	bool						cannot_connect;		// True if we cannot connect to the DNS service.
 	bool						config_needs_cancel;// True if the new_resolver_config updates need to be cancelled.
+	bool						replace_resolver;	// True if resolver needs to be replaced on wake.
 };
 
 MDNS_OBJECT_SUBKIND_DEFINE_FULL(dns_service);
@@ -1233,6 +1234,41 @@ mdns_dns_service_manager_get_count(const mdns_dns_service_manager_t me)
 }
 
 //======================================================================================================================
+
+void
+mdns_dns_service_manager_handle_sleep(const mdns_dns_service_manager_t me)
+{
+	mdns_dns_service_manager_iterate(me,
+	^ bool (const mdns_dns_service_t service)
+	{
+		const mdns_resolver_type_t type = _mdns_dns_service_get_resolver_type_safe(service);
+		if ((type == mdns_resolver_type_tls) || (type == mdns_resolver_type_https)) {
+			if (service->resolver) {
+				mdns_resolver_forget(&service->resolver);
+				service->replace_resolver = true;
+			}
+		}
+		return false;
+	});
+}
+
+//======================================================================================================================
+
+void
+mdns_dns_service_manager_handle_wake(const mdns_dns_service_manager_t me)
+{
+	mdns_dns_service_manager_iterate(me,
+	^ bool (const mdns_dns_service_t service)
+	{
+		if (service->replace_resolver) {
+			_mdns_dns_service_manager_prepare_service(me, service);
+			service->replace_resolver = false;
+		}
+		return false;
+	});
+}
+
+//======================================================================================================================
 // MARK: - DNS Service Manager Private Methods
 
 static void
@@ -2298,6 +2334,12 @@ _mdns_dns_service_manager_prepare_resolver(const mdns_dns_service_manager_t me, 
 	});
 	service->resolver = resolver;
 	resolver = NULL;
+
+	// Reset the "cannot connect" state if the service used to have a resolver that couldn't connect.
+	if (service->cannot_connect) {
+		service->cannot_connect = false;
+		_mdns_dns_service_manager_trigger_update(me);
+	}
 	mdns_resolver_activate(service->resolver);
 
 exit:

@@ -15,266 +15,170 @@
  */
 
 #include "mdns_set.h"
+
 #include "mdns_helpers.h"
 #include "mdns_objects.h"
+#include "mdns_set_imp.h"
 
 #include <CoreUtils/CoreUtils.h>
 
 //======================================================================================================================
 // MARK: - Set Kind Definition
 
-typedef struct _subset_s * _subset_t;
-
 struct mdns_set_s {
 	struct mdns_object_s	base;	// Object base.
-	_subset_t				list;	// Subset list.
+	mdns_set_imp_t			imp;	// Underlying set implementation object.
 };
 
 MDNS_OBJECT_SUBKIND_DEFINE(set);
 
 //======================================================================================================================
-// MARK: - Internal Data Structures
-
-typedef struct _item_s * _item_t;
-struct _item_s {
-	_item_t			next;	// Next item in list.
-	mdns_object_t	object;	// Object.
-};
-
-struct _subset_s {
-	_subset_t	next;	// Next subset in list.
-	uintptr_t	ident;	// Subset ID.
-	_item_t		list;	// Querier list.
-	size_t		count;	// Item count.
-};
-
-//======================================================================================================================
-// MARK: - Internal Helper Function Prototypes
-
-static _subset_t
-_subset_create(uintptr_t subset_id);
-
-static void
-_subset_free(_subset_t subset);
-#define _subset_forget(X) ForgetCustom(X, _subset_free)
-
-static _item_t
-_item_create(mdns_object_t object);
-
-static void
-_item_free(_item_t item);
-#define _item_forget(X) ForgetCustom(X, _item_free)
-
-//======================================================================================================================
 // MARK: - Set Public Methods
 
 mdns_set_t
-mdns_set_create(void)
+mdns_set_create(const uint32_t initial_capacity)
 {
-	return _mdns_set_alloc();
-}
+	mdns_set_t set = NULL;
+	mdns_set_t obj = _mdns_set_alloc();
+	require_quiet(obj, exit);
 
-//======================================================================================================================
+	obj->imp = mdns_set_imp_create(initial_capacity);
+	require_quiet(obj->imp, exit);
 
-OSStatus
-mdns_set_add(const mdns_set_t me, const uintptr_t subset_id, const mdns_object_t object)
-{
-	_subset_t *subset_ptr;
-	_subset_t subset;
-	for (subset_ptr = &me->list; (subset = *subset_ptr) != NULL; subset_ptr = &subset->next) {
-		if (subset->ident == subset_id) {
-			break;
-		}
-	}
-	OSStatus err;
-	_subset_t new_subset = NULL;
-	if (!subset) {
-		new_subset = _subset_create(subset_id);
-		require_action_quiet(new_subset, exit, err = kNoMemoryErr);
-		subset = new_subset;
-	}
-	_item_t *item_ptr;
-	_item_t item;
-	for (item_ptr = &subset->list; (item = *item_ptr) != NULL; item_ptr = &item->next) {
-		if (item->object == object) {
-			break;
-		}
-	}
-	require_action_quiet(!item, exit, err = kNoErr);
-
-	item = _item_create(object);
-	require_action_quiet(item, exit, err = kNoMemoryErr);
-
-	*item_ptr = item;
-	item = NULL;
-	++subset->count;
-	if (new_subset) {
-		*subset_ptr = new_subset;
-		new_subset = NULL;
-	}
-	err = kNoErr;
+	set = obj;
+	obj = NULL;
 
 exit:
-	_subset_forget(&new_subset);
-	return err;
-}
-
-//======================================================================================================================
-
-OSStatus
-mdns_set_remove(const mdns_set_t me, const uintptr_t subset_id, const mdns_object_t object)
-{
-	_subset_t *subset_ptr;
-	_subset_t subset;
-	for (subset_ptr = &me->list; (subset = *subset_ptr) != NULL; subset_ptr = &subset->next) {
-		if (subset->ident == subset_id) {
-			break;
-		}
-	}
-	OSStatus err;
-	require_action_quiet(subset, exit, err = kNotFoundErr);
-
-	_item_t *item_ptr;
-	_item_t item;
-	for (item_ptr = &subset->list; (item = *item_ptr) != NULL; item_ptr = &item->next) {
-		if (item->object == object) {
-			break;
-		}
-	}
-	require_action_quiet(item, exit, err = kNotFoundErr);
-
-	*item_ptr = item->next;
-	--subset->count;
-	_item_forget(&item);
-	if (!subset->list) {
-		*subset_ptr = subset->next;
-		_subset_forget(&subset);
-	}
-	err = kNoErr;
-
-exit:
-	return err;
-}
-
-//======================================================================================================================
-
-size_t
-mdns_set_get_count(const mdns_set_t me, const uintptr_t subset_id)
-{
-	_subset_t subset;
-	for (subset = me->list; subset; subset = subset->next) {
-		if (subset->ident == subset_id) {
-			return subset->count;
-		}
-	}
-	return 0;
+	mdns_forget(&obj);
+	return set;
 }
 
 //======================================================================================================================
 
 void
-mdns_set_iterate(const mdns_set_t me, const uintptr_t subset_id, mdns_set_applier_t applier)
+mdns_set_add(const mdns_set_t me, const mdns_object_t object)
 {
-	_subset_t subset = me->list;
-	while (subset && (subset->ident != subset_id)) {
-		subset = subset->next;
-	}
-	require_quiet(subset, exit);
+	mdns_set_imp_add(me->imp, object);
+}
 
-	for (_item_t item = subset->list; item; item = item->next) {
-		const bool stop = applier(item->object);
-		if (stop) {
-			break;
-		}
-	}
+//======================================================================================================================
 
-exit:
-	return;
+void
+mdns_set_remove(const mdns_set_t me, const mdns_object_t object)
+{
+	mdns_set_imp_remove(me->imp, object);
+}
+
+//======================================================================================================================
+
+size_t
+mdns_set_get_count(const mdns_set_t me)
+{
+	return mdns_set_imp_get_count(me->imp);
+}
+
+//======================================================================================================================
+
+void
+mdns_set_iterate(const mdns_set_t me, const mdns_set_applier_t applier)
+{
+	mdns_set_imp_iterate(me->imp, applier);
 }
 
 //======================================================================================================================
 // MARK: - Set Private Methods
 
+typedef struct _str_node_s	_str_node_t;
+struct _str_node_s {
+	_str_node_t *	next;	// Next node in list.
+	char *			str;	// Allocated C string.
+};
+
+static _str_node_t *
+_mdns_set_create_description_list(mdns_set_t set, bool privacy);
+
+static void
+_mdns_set_free_description_list(_str_node_t *list);
+#define _mdns_set_forget_description_list(X)	ForgetCustom(X, _mdns_set_free_description_list)
+
 static char *
-_mdns_set_copy_description(const mdns_set_t me, __unused const bool debug, __unused const bool privacy)
+_mdns_set_copy_description(const mdns_set_t me, const bool debug, const bool privacy)
 {
-	char *				description	= NULL;
-	char				buffer[128];
-	char *				dst			= buffer;
-	const char * const	lim			= &buffer[countof(buffer)];
-	int					n;
+	_str_node_t *list = _mdns_set_create_description_list(me, privacy);
+	char *buffer = NULL;
+	const char *lim = NULL;
+	char *description = NULL;
+	while (!description) {
+		size_t len = 0;
+		char *dst = buffer;
+	#define _do_appendf(...)											\
+		do {															\
+			const int n = mdns_snprintf_add(&dst, lim, __VA_ARGS__);	\
+			require_quiet(n >= 0, exit);								\
+			len += (size_t)n;											\
+		} while(0)
+		if (debug) {
+			_do_appendf("<%s: %p>: ", me->base.kind->name, me);
+		}
+		_do_appendf("{");
+		for (const _str_node_t *node = list; node; node = node->next) {
+			_do_appendf("\n\t%s", node->str ? node->str : "<NO DESC.>");
+		}
+		_do_appendf("\n}");
+	#undef _do_appendf
 
-	*dst = '\0';
-	n = mdns_snprintf_add(&dst, lim, "<%s: %p>: ", me->base.kind->name, me);
-	require_quiet(n >= 0, exit);
-
-	description = strdup(buffer);
+		if (!buffer) {
+			++len;
+			buffer = (char *)malloc(len);
+			require_quiet(buffer, exit);
+			lim = &buffer[len];
+			*buffer = '\0';
+		} else {
+			description = buffer;
+			buffer = NULL;
+		}
+	}
 
 exit:
+	ForgetMem(&buffer);
+	_mdns_set_forget_description_list(&list);
 	return description;
 }
+
+static _str_node_t *
+_mdns_set_create_description_list(const mdns_set_t me, const bool privacy)
+{
+	_str_node_t *list = NULL;
+	__block _str_node_t **ptr = &list;
+	mdns_set_iterate(me,
+	^ bool (mdns_object_t _Nonnull object)
+	{
+		_str_node_t * const node = (_str_node_t *)calloc(1, sizeof(*node));
+		require_return_value(node, true);
+		node->str = mdns_object_copy_description(object, false, privacy);
+		*ptr = node;
+		ptr = &node->next;
+		return false;
+	});
+	return list;
+}
+
+static void
+_mdns_set_free_description_list(_str_node_t *list)
+{
+	for (_str_node_t *node = list; node; node = list) {
+		list = node->next;
+		ForgetMem(&node->str);
+		ForgetMem(&node);
+	}
+}
+
 //======================================================================================================================
+
+#define _mdns_set_imp_forget(X)	ForgetCustom(X, mdns_set_imp_release)
 
 static void
 _mdns_set_finalize(const mdns_set_t me)
 {
-	_subset_t subset;
-	while ((subset = me->list) != NULL) {
-		me->list = subset->next;
-		_subset_free(subset);
-	}
-}
-
-//======================================================================================================================
-// MARK: - Internal Helper Functions
-
-static _subset_t
-_subset_create(const uintptr_t subset_id)
-{
-	const _subset_t obj = (_subset_t)calloc(1, sizeof(*obj));
-	require_quiet(obj, exit);
-
-	obj->ident = subset_id;
-
-exit:
-	return obj;
-}
-
-//======================================================================================================================
-
-static void
-_subset_free(const _subset_t me)
-{
-	me->next = NULL;
-	_item_t item;
-	while ((item = me->list) != NULL) {
-		me->list = item->next;
-		_item_free(item);
-	}
-	free(me);
-}
-
-//======================================================================================================================
-
-static _item_t
-_item_create(mdns_object_t object)
-{
-	const _item_t obj = (_item_t)calloc(1, sizeof(*obj));
-	require_quiet(obj, exit);
-
-	obj->object = object;
-	mdns_retain(obj->object);
-
-exit:
-	return obj;
-}
-
-//======================================================================================================================
-
-static void
-_item_free(const _item_t me)
-{
-	me->next = NULL;
-	mdns_forget(&me->object);
-	free(me);
+	_mdns_set_imp_forget(&me->imp);
 }

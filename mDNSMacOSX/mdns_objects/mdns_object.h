@@ -165,6 +165,26 @@ mdns_event_to_string(mdns_event_t event)
  */
 typedef void (^mdns_event_handler_t)(mdns_event_t event, OSStatus error);
 
+/*!
+ *	@brief
+ *		The type for a function that finalizes a user-defined context.
+ *
+ *	@param context
+ *		The user-defined context.
+ */
+typedef void
+(*mdns_context_finalizer_t)(void *context);
+
+/*!
+ *	@brief
+ *		Function of type mdns_context_finalizer_t that calls mdns_release() on the context argument.
+ *
+ *	@param context
+ *		The user-defined context.
+ */
+void
+mdns_object_context_finalizer(void *context);
+
 __END_DECLS
 
 MDNS_ASSUME_NONNULL_END

@@ -106,7 +106,7 @@ void dso_drop(dso_state_t *dso)
     dso_connections_needing_cleanup = dso;
 }
 
-int32_t dso_idle(void *context, int64_t now, int32_t next_timer_event)
+int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event)
 {
     dso_state_t *dso, *dnext;
     dso_activity_t *ap, *anext;

@@ -39,5 +39,7 @@ extern void Querier_HandleStoppedDNSQuestion(DNSQuestion *q);
 extern void Querier_RegisterDoHURI(const char *doh_uri, const char *domain);
 extern void Querier_PrepareQuestionForCNAMERestart(DNSQuestion *q);
 extern void Querier_PrepareQuestionForUnwindRestart(DNSQuestion *q);
+extern void Querier_HandleSleep(void);
+extern void Querier_HandleWake(void);
 
 #endif  // __QUERIER_SUPPORT_H__

@@ -96,9 +96,7 @@
 #include <dlfcn.h>
 #endif // TARGET_OS_IPHONE
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, IGNORE_HOSTS_FILE)
-#include "system_utilities.h"               // For os_variant_has_internal_diagnostics().
-#endif
+#include "system_utilities.h"
 
 // Include definition of opaque_presence_indication for KEV_DL_NODE_PRESENCE handling logic.
 #include <Kernel/IOKit/apple80211/apple80211_var.h>
@@ -7389,35 +7387,14 @@ mDNSexport void mDNSPlatformDispatchAsync(mDNS *const m, void *context, AsyncDis
 #define OSX_VER_LEN     sizeof_string(OSX_VER) 
 #define VER_NUM_LEN     2  // 2 digits of version number added to base string
 
-#define MODEL_COLOR           "ecolor="
-#define MODEL_COLOR_LEN       sizeof_string(MODEL_COLOR)
-#define MODEL_RGB_VALUE_LEN   sizeof_string("255,255,255") // 'r,g,b'
+#define MODEL_RGB_COLOR       "ecolor="
+#define MODEL_INDEX_COLOR     "icolor="
+#define MODEL_COLOR_LEN       sizeof_string(MODEL_RGB_COLOR) // Same len as MODEL_INDEX_COLOR
+#define MODEL_COLOR_VALUE_LEN sizeof_string("255,255,255")   // 'r,g,b', 'i' MAXUINT32('4294967295')
 
 // Bytes available in TXT record for model name after subtracting space for other
 // fixed size strings and their length bytes.
-#define MAX_MODEL_NAME_LEN   (256 - (DEVINFO_MODEL_LEN + 1) - (OSX_VER_LEN + VER_NUM_LEN + 1) - (MODEL_COLOR_LEN + MODEL_RGB_VALUE_LEN + 1))
-
-mDNSlocal mDNSu8 getModelIconColors(char *color)
-{
-    mDNSPlatformMemZero(color, MODEL_RGB_VALUE_LEN + 1);
-
-#if TARGET_OS_OSX && defined(kIOPlatformDeviceEnclosureColorKey)
-    mDNSu8   red      = 0;
-    mDNSu8   green    = 0;
-    mDNSu8   blue     = 0;
-
-    IOReturn rGetDeviceColor = IOPlatformGetDeviceColor(kIOPlatformDeviceEnclosureColorKey,
-                                                        &red, &green, &blue);
-    if (kIOReturnSuccess == rGetDeviceColor)
-    {
-        // IOKit was able to get enclosure color for the current device.
-        return snprintf(color, MODEL_RGB_VALUE_LEN + 1, "%d,%d,%d", red, green, blue);
-    }
-#endif
-
-    return 0;
-}
-
+#define MAX_MODEL_NAME_LEN   (256 - (DEVINFO_MODEL_LEN + 1) - (OSX_VER_LEN + VER_NUM_LEN + 1) - (MODEL_COLOR_LEN + MODEL_COLOR_VALUE_LEN + 1))
 
 // Initialize device-info TXT record contents and return total length of record data.
 mDNSexport mDNSu32 initializeDeviceInfoTXT(mDNS *m, mDNSu8 *ptr)
@@ -7446,17 +7423,22 @@ mDNSexport mDNSu32 initializeDeviceInfoTXT(mDNS *m, mDNSu8 *ptr)
         mDNSPlatformMemCopy(ptr, ver_num, VER_NUM_LEN);
         ptr += VER_NUM_LEN;
 
-        char rgb[MODEL_RGB_VALUE_LEN + 1]; // RGB value + null written by snprintf
-        len = getModelIconColors(rgb);
-        if (len)
+        const uint8_t max_color_len = MODEL_COLOR_VALUE_LEN + 1;
+        char color[max_color_len]; // Color string value + null written by snprintf
+        util_enclosure_color_t color_type = util_get_enclosure_color_str(color, max_color_len, &len);
+        if (color_type != util_enclosure_color_none && len < max_color_len)
         {
             *ptr = MODEL_COLOR_LEN + len; // length byte
             ptr++;
 
-            mDNSPlatformMemCopy(ptr, MODEL_COLOR, MODEL_COLOR_LEN);
+            if (color_type == util_enclosure_color_rgb) {
+                mDNSPlatformMemCopy(ptr, MODEL_RGB_COLOR, MODEL_COLOR_LEN);
+            } else {
+                mDNSPlatformMemCopy(ptr, MODEL_INDEX_COLOR, MODEL_COLOR_LEN);
+            }
             ptr += MODEL_COLOR_LEN;
 
-            mDNSPlatformMemCopy(ptr, rgb, len);
+            mDNSPlatformMemCopy(ptr, color, len);
             ptr += len;
         }
     }

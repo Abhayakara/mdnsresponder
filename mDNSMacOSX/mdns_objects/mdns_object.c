@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -95,6 +95,14 @@ mdns_equal(mdns_object_t me, mdns_object_t other)
 		return me->kind->equal(me, other);
 	}
 	return false;
+}
+
+//======================================================================================================================
+
+void
+mdns_object_context_finalizer(void * const context)
+{
+	mdns_release((mdns_object_t)context);
 }
 
 //======================================================================================================================

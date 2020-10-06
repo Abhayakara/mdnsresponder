@@ -126,7 +126,7 @@ struct dso_activity {
 
 typedef struct dso_transport dso_transport_t;
 typedef struct dso_state dso_state_t;
-typedef int64_t event_time_t;
+typedef int32_t event_time_t;
 
 typedef void (*dso_event_callback_t)(void *context, const void *header,
                                      dso_state_t *dso, dso_event_type_t eventType);
@@ -168,7 +168,7 @@ dso_state_t *dso_create(bool is_server, int max_outstanding_queries, const char 
                         dso_event_callback_t callback, void *context, dso_transport_t *transport);
 dso_state_t *dso_find_by_serial(uint32_t serial);
 void dso_drop(dso_state_t *dso);
-int32_t dso_idle(void *context, int64_t now, int32_t next_timer_event);
+int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event);
 void dso_release(dso_state_t **dsop);
 void dso_start_tlv(dso_message_t *state, int opcode);
 void dso_add_tlv_bytes(dso_message_t *state, const uint8_t *bytes, size_t len);

@@ -480,7 +480,7 @@ mDNSexport TCPListener *mDNSPlatformTCPListen(mDNSAddr_Type addrType, mDNSIPPort
         }
         return mDNSNULL;
     }
-
+    
     // Allocate a listener structure
     ret = (TCPListener *) mDNSPlatformMemAllocateClear(sizeof *ret);
     if (ret == NULL)
@@ -577,7 +577,7 @@ mDNSexport mStatus mDNSPlatformTCPConnect(TCPSocket *sock, const mDNSAddr *dst, 
 #else
             (void)iface;
 #endif // IPV6_BOUND_IF
-        }
+        }           
 #endif // SO_BINDTODEVICE
     }
 
@@ -614,12 +614,12 @@ mDNSexport mStatus mDNSPlatformTCPConnect(TCPSocket *sock, const mDNSAddr *dst, 
                     sock->events.fd, errno, strerror(errno));
         }
         else
-        {
+        { 
             LogMsg("ERROR: mDNSPlatformTCPConnect - connect failed: socket %d: Error %d (%s) length %d",
                    sock->events.fd, errno, strerror(errno), len);
         }
         return mStatus_ConnFailed;
-    }
+    }       
 
     LogMsg("NOTE: mDNSPlatformTCPConnect completed synchronously");
     return mStatus_NoError;
@@ -640,7 +640,7 @@ mDNSexport void mDNSPlatformTCPCloseConnection(TCPSocket *sock)
 mDNSexport long mDNSPlatformReadTCP(TCPSocket *sock, void *buf, unsigned long buflen, mDNSBool * closed)
 {
     ssize_t nread;
-
+    
     *closed = mDNSfalse;
     if (sock->flags & kTCPSocketFlags_UseTLS)
     {

@@ -422,17 +422,19 @@ mDNSlocal void _Querier_UpdateDNSMessageSizeMetrics(const mdns_querier_t querier
 }
 #endif
 
+#define kOrphanedQuerierMaxCount 10
+
 mDNSlocal mdns_set_t _Querier_GetOrphanedQuerierSet(void)
 {
     static mdns_set_t sOrphanedQuerierSet = NULL;
     if (!sOrphanedQuerierSet)
     {
-        sOrphanedQuerierSet = mdns_set_create();
+        sOrphanedQuerierSet = mdns_set_create(kOrphanedQuerierMaxCount);
     }
     return sOrphanedQuerierSet;
 }
 
-mDNSlocal void _Querier_HandleQuerierResponse(const mdns_querier_t querier, const mdns_dns_service_t dnsservice)
+mDNSlocal void _Querier_HandleQuerierResponse(const mdns_querier_t querier)
 {
     KQueueLock();
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
@@ -444,6 +446,7 @@ mDNSlocal void _Querier_HandleQuerierResponse(const mdns_querier_t querier, cons
     if (resultType == mdns_querier_result_type_response)
     {
         mDNS *const m = &mDNSStorage;
+        const mdns_dns_service_t dnsservice = (mdns_dns_service_t)mdns_querier_get_context(querier);
         if (!mdns_dns_service_is_defunct(dnsservice))
         {
             size_t copyLen = mdns_querier_get_response_length(querier);
@@ -462,7 +465,7 @@ mDNSlocal void _Querier_HandleQuerierResponse(const mdns_querier_t querier, cons
     const mdns_set_t set = _Querier_GetOrphanedQuerierSet();
     if (set)
     {
-        mdns_set_remove(set, (uintptr_t)dnsservice, querier);
+        mdns_set_remove(set, querier);
     }
     DNSQuestion *const q = Querier_GetDNSQuestion(querier);
     if (q)
@@ -501,25 +504,24 @@ mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
     if (set)
     {
         __block mdns_querier_t orphan = NULL;
-        mdns_set_iterate(set, (uintptr_t)q->dnsservice,
+        mdns_set_iterate(set,
         ^ bool (mdns_object_t _Nonnull object)
         {
+            bool stop = false;
             const mdns_querier_t candidate = (mdns_querier_t)object;
-            if (mdns_querier_match(candidate, q->qname.c, q->qtype, q->qclass))
+            const mdns_dns_service_t dnsservice = (mdns_dns_service_t)mdns_querier_get_context(candidate);
+            if ((dnsservice == q->dnsservice) && mdns_querier_match(candidate, q->qname.c, q->qtype, q->qclass))
             {
                 orphan = candidate;
-                return true;
+                stop = true;
             }
-            else
-            {
-                return false;
-            }
+            return stop;
         });
         if (orphan)
         {
             q->querier = orphan;
             mdns_retain(q->querier);
-            mdns_set_remove(set, (uintptr_t)q->dnsservice, q->querier);
+            mdns_set_remove(set, q->querier);
             mdns_querier_set_time_limit_ms(q->querier, 0);
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
                 "[Q%u->Q%u] Adopted orphaned querier", mDNSVal16(q->TargetQID), mdns_querier_get_user_id(q->querier));
@@ -533,31 +535,29 @@ mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
         const OSStatus err = mdns_querier_set_query(querier, q->qname.c, q->qtype, q->qclass);
         require_noerr_quiet(err, exit);
 
-        q->querier = querier;
-        mdns_retain(q->querier);
-
-
         if (q->pid != 0)
         {
-            mdns_querier_set_delegator_pid(q->querier, q->pid);
+            mdns_querier_set_delegator_pid(querier, q->pid);
         }
         else
         {
-            mdns_querier_set_delegator_uuid(q->querier, q->uuid);
+            mdns_querier_set_delegator_uuid(querier, q->uuid);
         }
+        mdns_retain(q->dnsservice);
+        mdns_querier_set_context(querier, q->dnsservice);
+        mdns_querier_set_context_finalizer(querier, mdns_object_context_finalizer);
         mdns_querier_set_queue(querier, dispatch_get_main_queue());
         mdns_retain(querier);
-        const mdns_dns_service_t dnsservice = q->dnsservice;
-        mdns_retain(dnsservice);
         mdns_querier_set_result_handler(querier,
         ^{
-            _Querier_HandleQuerierResponse(querier, dnsservice);
+            _Querier_HandleQuerierResponse(querier);
             mdns_release(querier);
-            mdns_release(dnsservice);
         });
         mdns_querier_set_log_label(querier, "Q%u", mDNSVal16(q->TargetQID));
         mdns_querier_set_user_id(querier, mDNSVal16(q->TargetQID));
-        mdns_querier_activate(querier);
+        q->querier = querier;
+        mdns_retain(q->querier);
+        mdns_querier_activate(q->querier);
     }
 #if MDNSRESPONDER_SUPPORTS(APPLE, METRICS)
     if (mdns_querier_get_resolver_type(q->querier) == mdns_resolver_type_normal)
@@ -768,21 +768,19 @@ mDNSexport mDNSBool Querier_SameNameCacheRecordIsAnswer(const CacheRecord *const
     }
 }
 
-#define kOrphanedQuerierTimeLimitSecs       5
-#define kOrphanedQuerierSubsetCountLimit    10
+#define kOrphanedQuerierTimeLimitSecs 5
 
 mDNSexport void Querier_HandleStoppedDNSQuestion(DNSQuestion *q)
 {
-    if (q->querier && !mdns_querier_has_concluded(q->querier) &&
-        q->dnsservice && !mdns_dns_service_is_defunct(q->dnsservice))
+    if (q->querier && !mdns_querier_has_concluded(q->querier))
     {
-        const mdns_set_t set = _Querier_GetOrphanedQuerierSet();
-        const uintptr_t subsetID = (uintptr_t)q->dnsservice;
-        if (set && (mdns_set_get_count(set, subsetID) < kOrphanedQuerierSubsetCountLimit))
+        const mdns_dns_service_t dnsservice = (mdns_dns_service_t)mdns_querier_get_context(q->querier);
+        if (!mdns_dns_service_is_defunct(dnsservice))
         {
-            const OSStatus err = mdns_set_add(set, subsetID, q->querier);
-            if (!err)
+            const mdns_set_t set = _Querier_GetOrphanedQuerierSet();
+            if (set && (mdns_set_get_count(set) < kOrphanedQuerierMaxCount))
             {
+                mdns_set_add(set, q->querier);
                 LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
                     "[Q%u] Keeping orphaned querier for up to " StringifyExpansion(kOrphanedQuerierTimeLimitSecs) " seconds",
                     mdns_querier_get_user_id(q->querier));
@@ -807,5 +805,23 @@ mDNSexport void Querier_PrepareQuestionForUnwindRestart(DNSQuestion *const q)
 {
     q->lastDNSServiceID = 0;
     q->ForcePathEval    = mDNStrue;
+}
+
+mDNSexport void Querier_HandleSleep(void)
+{
+    const mdns_dns_service_manager_t manager = Querier_GetDNSServiceManager();
+    if (manager)
+    {
+        mdns_dns_service_manager_handle_sleep(manager);
+    }
+}
+
+mDNSexport void Querier_HandleWake(void)
+{
+    const mdns_dns_service_manager_t manager = Querier_GetDNSServiceManager();
+    if (manager)
+    {
+        mdns_dns_service_manager_handle_wake(manager);
+    }
 }
 #endif // MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
