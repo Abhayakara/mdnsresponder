@@ -2410,7 +2410,26 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
 static void
 refresh_interface_list(void)
 {
+    interface_t *interface;
+    bool have_active = false;
     ioloop_map_interface_addresses(NULL, ifaddr_callback);
+    for (interface = interfaces; interface; interface = interface->next) {
+        if (!interface->ineligible && !interface->inactive) {
+            have_active = true;
+        }
+    }
+
+    // Notice if we have lost or gained infrastructure.
+    if (have_active && !have_non_thread_interface) {
+        INFO("refresh_interface_list: we have an active interface");
+        have_non_thread_interface = true;
+        partition_can_advertise_service = true;
+    } else if (!have_active && have_non_thread_interface) {
+        INFO("refresh_interface_list: we no longer have an active interface");
+        have_non_thread_interface = false;
+        // Stop advertising the service, if we are doing so.
+        partition_discontinue_srp_service();
+    }
 }
 
 
