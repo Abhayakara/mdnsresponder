@@ -214,6 +214,29 @@ srp_random16()
 #endif
 }
 
+uint32_t
+srp_random32()
+{
+#ifdef EXCLUDE_CRYPTO
+    // Note that this is the wrong thing to return here and needs to be fixed.
+    return otRandomNonCryptoGetUint32();
+#else
+    int status;
+    uint32_t ret;
+    char errbuf[64];
+    if (rng_state_fetch()) {
+        status = mbedtls_ctr_drbg_random(&rng_state->rng_context, (unsigned char *)&ret, sizeof ret);
+        if (status != 0) {
+            mbedtls_strerror(status, errbuf, sizeof errbuf);
+            ERROR("mbedtls_ctr_drbg_random failed: %s", errbuf);
+            return 0xffff;
+        }
+        return ret;
+    }
+    return 0xffffffff;
+#endif
+}
+
 srp_key_t *
 srp_load_key_from_buffer(const uint8_t *buffer, size_t length)
 {

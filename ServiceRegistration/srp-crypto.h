@@ -151,6 +151,7 @@ int srp_remove_key_file(void *NULLABLE host_context, const char *NONNULL key_nam
 
 // sign_*.c:
 void srp_keypair_free(srp_key_t *NONNULL key);
+uint32_t srp_random32(void);
 uint16_t srp_random16(void);
 int srp_key_algorithm(srp_key_t *NONNULL key);
 size_t srp_pubkey_length(srp_key_t *NONNULL key);

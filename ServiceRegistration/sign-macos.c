@@ -57,6 +57,12 @@ srp_random16()
     return arc4random_uniform(65536);
 }
 
+uint32_t
+srp_random32()
+{
+    return arc4random();
+}
+
 static void
 srp_sec_error_print(const char *reason, OSStatus status)
 {

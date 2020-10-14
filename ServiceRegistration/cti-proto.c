@@ -72,7 +72,7 @@ cti_make_space(cti_buffer_t *buf, size_t space)
 	}
 	if (buf->current + space > buf->size) {
 		size_t next_increment = buf->size * 2;
-		if (buf->current + space > buf->size) {
+		if (next_increment + space > buf->size) {
 			next_increment += space;
 		}
 		void *new_buf = malloc(next_increment);
@@ -83,6 +83,7 @@ cti_make_space(cti_buffer_t *buf, size_t space)
 		memcpy(new_buf, buf->buffer, buf->current);
 		free(buf->buffer);
 		buf->buffer = new_buf;
+        buf->size = next_increment;
 	}
 	return true;
 }

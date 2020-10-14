@@ -97,7 +97,8 @@ struct client_state {
     service_addr_t stable_server;
     bool srp_server_synced;
 
-    int client_serial;
+    uint32_t client_serial;
+    bool client_serial_set;
 
     // Currently we only ever have one update in flight.  If we decide we need to send another,
     // we need to cancel the one we're currently doing.
@@ -667,11 +668,12 @@ do_callbacks(client_state_t *client, uint32_t serial, int err, bool succeeded)
             }
             work = true;
             rp->called_back = true;
-            if (rp->callback != NULL) {
-                rp->callback(rp, kDNSServiceFlagsAdd, err, rp->name, rp->regtype, rp->domain, rp->context);
-            }
             if (succeeded) {
                 rp->succeeded = true;
+            }
+            if (rp->callback != NULL) {
+                rp->callback(rp, kDNSServiceFlagsAdd, err, rp->name, rp->regtype, rp->domain, rp->context);
+                break;
             }
         }
     } while (work);
@@ -806,7 +808,7 @@ udp_retransmit(void *v_update_context)
         reg_state_t *registration;
         for (registration = client->registrations; registration; registration = registration->next) {
             if (registration->callback != NULL && registration->serial <= context->serial &&
-                !(registration->flags & kDNSServiceFlagsTimeout))
+                (registration->flags & kDNSServiceFlagsTimeout))
             {
                 timeout_requested = true;
             }
@@ -882,7 +884,8 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
     int err;
     int rcode = dns_rcode_get(message);
     (void)message_length;
-    uint32_t new_lease_time;
+    uint32_t new_lease_time = 0;
+    bool lease_time_sent = false;
     reg_state_t *registration;
     const uint8_t *p = message->data;
     const uint8_t *end = (const uint8_t *)v_message + message_length;
@@ -937,32 +940,65 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
         // At present, there's no code to actually parse a real DNS packet in the client, so
         // we rely on the server returning just an EDNS0 option; if this assumption fails, we
         // are out of luck.
-        if (message->qdcount == 0 && message->ancount == 0 &&
-            message->nscount == 0 && ntohs(message->arcount) == 1 &&
-
+        if (message->qdcount == 0 && message->ancount == 0 && message->nscount == 0 && ntohs(message->arcount) == 1 &&
             // We expect the edns0 option to be:
             // root label - 1 byte
             // type = 2 bytes
             // class = 2 bytes
             // ttl = 4 bytes
             // rdlength = 2 bytes
-            // lease option code = 2
-            // lease option length = 2
-            // lease = 4
-            // key lease = 4
-            // total = 23
-            end - p == 23 && // right number of bytes for an EDNS0 OPT containing an update lease option
+            // total of 11 bytes
+            // data
+            end - p > 11 && // Enough room for an EDNS0 option
             *p == 0 &&       // root label
-            p[1] == (dns_rrtype_opt >> 8) && p[2] == (dns_rrtype_opt & 255) &&
-            // skip class and ttl, we don't care
-            p[9] == 0 && p[10] == 12 && // rdlength
-            p[11] == (dns_opt_update_lease >> 8) && p[12] == (dns_opt_update_lease & 255) &&
-            p[13] == 0 && p[14] == 8) // opt_length
+            p[1] == (dns_rrtype_opt >> 8) && p[2] == (dns_rrtype_opt & 255)) // opt rrtype
         {
-            new_lease_time = (((uint32_t)p[15] << 12) | ((uint32_t)p[16] << 8) |
-                              ((uint32_t)p[17] << 8) | ((uint32_t)p[18]));
-            INFO("Lease time set to %" PRIu32, new_lease_time);
-        } else {
+            // skip class and ttl, we don't care
+            const uint8_t *opt_start = &p[11]; // Start of opt data
+            uint16_t opt_len = (((uint16_t)p[9]) << 8) + p[10]; // length of opt data
+            const uint8_t *opt_cur = opt_start;
+            uint16_t opt_remaining = opt_len;
+            while (opt_cur + opt_remaining <= end) {
+                int option_code = (((uint16_t)opt_cur[0]) << 8) + opt_cur[1];
+                int option_len =  (((uint16_t)opt_cur[2]) << 8) + opt_cur[3];
+                const uint8_t *option_data = opt_cur + 4;
+                if (option_len + option_data <= end) {
+                    if (option_code == dns_opt_update_lease) {
+                        if (option_len == 8) {
+                            new_lease_time = (((uint32_t)option_data[0] << 24) | ((uint32_t)option_data[1] << 16) |
+                                              ((uint32_t)option_data[2] << 8) | ((uint32_t)option_data[3]));
+                            INFO("Lease time set to %" PRIu32, new_lease_time);
+                            lease_time_sent = true;
+                        }
+                    } else if (option_code == dns_opt_srp_serial) {
+                        if (option_len == 4) {
+                            if (client->client_serial_set) {
+                                ERROR("Response erroneously contains serial number when we sent one.");
+                            } else {
+                                client->client_serial =
+                                    (((uint32_t)option_data[0] << 24) | ((uint32_t)option_data[1] << 16) |
+                                     ((uint32_t)option_data[2] << 8) | ((uint32_t)option_data[3]));
+                                client->client_serial_set = true;
+                            }
+                        }
+                    }
+                }
+                opt_cur = option_data + option_len;
+                opt_remaining = opt_remaining - (option_len + 4);
+            }
+        }
+
+        // If we didn't get back a serial number, generate a random one. This should never happen.
+        // Of course, since earlier versions of SRP didn't have a serial number, it /will/ happen
+        // when communicating with older SRP servers, which is why we do this.
+        if (!client->client_serial_set) {
+            client->client_serial = srp_random32();
+            client->client_serial_set = true;
+            ERROR("Server didn't offer a serial number when we didn't send one: set to %" PRIx32 "!",
+                  client->client_serial );
+        }
+
+        if (!lease_time_sent) {
             new_lease_time = context->lease_time;
             INFO("Lease time defaults to %" PRIu32, new_lease_time);
             DEBUG("len %zd qd %d an %d ns %d ar %d data %02x %02x %02x %02x %02x %02x %02x %02x %02x"
@@ -1280,6 +1316,17 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
         dns_u32_to_wire(&towire, update_key_lease_time); CH; // KEY-LEASE (7 days)
     }
     dns_edns0_option_end(&towire); CH;                   // Now we know OPTION-LENGTH
+    // Now send a serial number if we have one. We send the current serial number plus one.
+    if (client->client_serial_set) {
+        // Increment the serial number. We increment the serial number each time we generate a new update, which can
+        // mean that if we have to switch to a new server, the serial number increases by more than one before we get
+        // a success response. This should be okay.
+        client->client_serial = client->client_serial + 1;
+        dns_u16_to_wire(&towire, dns_opt_srp_serial); CH;
+        dns_edns0_option_begin(&towire); CH;
+        dns_u32_to_wire(&towire, client->client_serial);
+        dns_edns0_option_end(&towire); CH;                   // Now we know OPTION-LENGTH
+    }
     dns_rdlength_end(&towire); CH;
     INCREMENT(message->arcount);
 

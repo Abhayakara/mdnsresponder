@@ -28,6 +28,7 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <dns_sd.h>
+#include <inttypes.h>
 
 #include "srp.h"
 #include "dns-msg.h"
@@ -152,10 +153,11 @@ srp_evaluate(comm_t *connection, dns_message_t *message, message_t *raw_message)
     int num_keys = 0;
     int max_keys = 1;
     bool found_key = false;
-    uint32_t lease_time, key_lease_time;
+    uint32_t lease_time, key_lease_time, serial_number;
     dns_edns0_t *edns0;
     int rcode = dns_rcode_servfail;
     bool found_lease = false;
+    bool found_serial = false;
 
     // Update requires a single SOA record as the question
     if (message->qdcount != 1) {
@@ -600,6 +602,7 @@ srp_evaluate(comm_t *connection, dns_message_t *message, message_t *raw_message)
     // Get the lease time.
     lease_time = 3600;
     key_lease_time = 604800;
+    serial_number = 0;
     for (edns0 = message->edns0; edns0; edns0 = edns0->next) {
         if (edns0->type == dns_opt_update_lease) {
             unsigned off = 0;
@@ -615,19 +618,27 @@ srp_evaluate(comm_t *connection, dns_message_t *message, message_t *raw_message)
                 key_lease_time = 7 * lease_time;
             }
             found_lease = true;
-            break;
+        } else if (edns0->type == dns_opt_srp_serial) {
+            unsigned off = 0;
+            if (edns0->length != 4) {
+                ERROR("srp_evaluate: edns0 srp serial number length bogus: %d", edns0->length);
+                rcode = dns_rcode_formerr;
+                goto out;
+            }
+            dns_u32_parse(edns0->data, edns0->length, &off, &serial_number);
+            found_serial = true;
         }
     }
 
     // Start the update.
     DNS_NAME_GEN_SRP(host_description->name, host_description_name_buf);
-    INFO("srp_evaluate: update for " PRI_DNS_NAME_SRP " xid %x validates, lease time %d%s.",
+    INFO("srp_evaluate: update for " PRI_DNS_NAME_SRP " xid %x validates, lease time %d%s, serial %" PRIu32 "%s.",
          DNS_NAME_PARAM_SRP(host_description->name, host_description_name_buf), raw_message->wire.id,
-         lease_time, found_lease ? "(found)" : "");
+         lease_time, found_lease ? " (found)" : "", serial_number, found_serial ? " (found)" : " (not sent)");
     rcode = dns_rcode_noerror;
     ret = srp_update_start(connection, message, raw_message, host_description, service_instances, services,
                            replacement_zone == NULL ? update_zone : replacement_zone,
-                           lease_time, key_lease_time);
+                           lease_time, key_lease_time, serial_number, found_serial);
     if (ret) {
         goto success;
     }

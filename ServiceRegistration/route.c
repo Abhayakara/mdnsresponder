@@ -151,7 +151,6 @@ int ula_serial = 1;
 bool advertise_default_route_on_thread;
 subproc_t *thread_interface_enumerator_process;
 subproc_t *thread_prefix_adder_process;
-subproc_t *link_route_adder_process;
 subproc_t *thread_rti_setter_process;
 subproc_t *thread_forwarding_setter_process;
 subproc_t *thread_proxy_service_adder_process;
@@ -792,6 +791,8 @@ router_discovery_stop(interface_t *interface, uint64_t now)
     interface->router_discovery_complete = true;
     interface->router_discovery_in_progress = false;
     interface->vicarious_router_discovery_in_progress = false;
+    // clear out need_reconfigure_prefix when router_discovery_complete is set back to true.
+    interface->need_reconfigure_prefix = false;
     flush_stale_routers(interface, now);
 
     // See if we need a new prefix on the interface.
@@ -803,11 +804,25 @@ adjust_router_received_time(interface_t *const interface, const uint64_t now, co
 {
     icmp_message_t *router;
 
+    if (interface->routers == NULL) {
+        if (interface->advertise_ipv6_prefix) {
+            SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __ipv6_prefix);
+            INFO("adjust_router_received_time: No router information available for the interface - "
+                 "ifname: " PUB_S_SRP ", prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                 interface->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __ipv6_prefix));
+        } else {
+            INFO("adjust_router_received_time: No router information available for the interface - "
+                 "ifname: " PUB_S_SRP, interface->name);
+        }
+
+        goto exit;
+    }
+
     for (router = interface->routers; router != NULL; router = router->next) {
         SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, __router_src_addr_buf);
         // Only adjust the received time once.
         if (router->received_time_already_adjusted) {
-            DEBUG("adjust_router_received_time: received time already adjusted - remaining time: %llu, "
+            INFO("adjust_router_received_time: received time already adjusted - remaining time: %llu, "
                   "router src: " PRI_SEGMENTED_IPv6_ADDR_SRP, (now - router->received_time) / MSEC_PER_SEC,
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, __router_src_addr_buf));
             continue;
@@ -819,7 +834,7 @@ adjust_router_received_time(interface_t *const interface, const uint64_t now, co
                   "now: %" PRIu64 ", time_adjusted: %" PRId64, now, time_adjusted));
         router->received_time = now + time_adjusted;
         router->received_time_already_adjusted = true; // Only adjust the icmp message received time once.
-        DEBUG("adjust_router_received_time: router received time is adjusted - router src: " PRI_SEGMENTED_IPv6_ADDR_SRP
+        INFO("adjust_router_received_time: router received time is adjusted - router src: " PRI_SEGMENTED_IPv6_ADDR_SRP
               ", adjusted value: %" PRId64,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, __router_src_addr_buf), time_adjusted);
     }
@@ -964,7 +979,8 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
               interface->preferred_lifetime == 0)) {
 
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
-        INFO("routing_policy_evaluate: advertising prefix again - ifname: " PUB_S_SRP ", prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP, interface->name,
+        INFO("routing_policy_evaluate: advertising prefix again - ifname: " PUB_S_SRP
+             ", prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP, interface->name,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
 
         // If we were deprecating, stop.
@@ -990,6 +1006,19 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
             interface->advertise_ipv6_prefix = true;
             something_changed = true;
         }
+    }
+    // If there is no on-link prefix present, and srp-mdns-proxy itself is advertising the prefix, and it has configured
+    // an on-link prefix, and the interface is not thread interface, and it just got an interface address removal event,
+    // it is possible that the IPv6 routing has been flushed due to loss of address in configd, so here we explicitly
+    // reconfigure the IPv6 prefix and the routing.
+    else if (interface->need_reconfigure_prefix && !on_link_prefix_present && interface->advertise_ipv6_prefix &&
+             interface->on_link_prefix_configured && !interface->is_thread) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
+        INFO("routing_policy_evaluate: reconfigure ipv6 prefix due to possible network changes -"
+             " prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
+        interface_prefix_configure(interface->ipv6_prefix, interface);
+        interface->need_reconfigure_prefix = false;
     }
 
     // If we've been looking to see if there's an on-link prefix, and we got one from the new router advertisement,
@@ -1248,7 +1277,8 @@ link_route_done(void *context, int status, const char *error)
     } else {
         INFO("link_route_done on " PUB_S_SRP ": %d.", interface->name, status);
     }
-    ioloop_subproc_release(link_route_adder_process);
+    ioloop_subproc_release(interface->link_route_adder_process);
+    interface->link_route_adder_process = NULL;
     // Now that the on-link prefix is configured, time for a policy re-evaluation.
     interface->on_link_prefix_configured = true;
     routing_policy_evaluate(interface, true);
@@ -1276,8 +1306,8 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
 
     INFO("interface_prefix_configure: /sbin/ipconfig " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " "
          PUB_S_SRP, args[0], args[1], args[2], args[3], args[4]);
-    link_route_adder_process = ioloop_subproc("/usr/sbin/ipconfig", args, 5, link_route_done, interface, NULL);
-    if (link_route_adder_process == NULL) {
+    interface->link_route_adder_process = ioloop_subproc("/usr/sbin/ipconfig", args, 5, link_route_done, interface, NULL);
+    if (interface->link_route_adder_process == NULL) {
         ERROR("interface_prefix_configure: unable to set interface address for %s to %s.", interface->name, addrbuf);
     }
 #elif defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IFCONFIG)
@@ -1290,8 +1320,8 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
     char *args[] = { interface->name, "add", addrbuf };
 
     INFO("interface_prefix_configure: /sbin/ifconfig %s %s %s", args[0], args[1], args[2]);
-    link_route_adder_process = ioloop_subproc("/sbin/ifconfig", args, 3, link_route_done, NULL, interface);
-    if (link_route_adder_process == NULL) {
+    interface->link_route_adder_process = ioloop_subproc("/sbin/ifconfig", args, 3, link_route_done, NULL, interface);
+    if (interface->link_route_adder_process == NULL) {
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface_address.s6_addr, if_addr_buf);
         ERROR("interface_prefix_configure: unable to set interface address for " PUB_S_SRP " to "
               PRI_SEGMENTED_IPv6_ADDR_SRP ".", interface->name,
@@ -1339,6 +1369,7 @@ thread_forwarding_done(void *UNUSED context, int status, const char *error)
         INFO("thread_forwarding_done: %d.", status);
     }
     ioloop_subproc_release(thread_forwarding_setter_process);
+    thread_forwarding_setter_process = NULL;
 }
 
 static void
@@ -1395,6 +1426,7 @@ thread_rti_done(void *UNUSED context, int status, const char *error)
         INFO("thread_rti_done: %d.", status);
     }
     ioloop_subproc_release(thread_rti_setter_process);
+    thread_rti_setter_process = NULL;
 }
 
 static void
@@ -1427,6 +1459,7 @@ thread_prefix_done(void *UNUSED context, int status, const char *error)
         }
     }
     ioloop_subproc_release(thread_prefix_adder_process);
+    thread_prefix_adder_process = NULL;
 }
 #endif
 
@@ -1797,6 +1830,8 @@ post_solicit_policy_evaluate(void *context)
     interface_prefix_evaluate(interface);
 
     routing_policy_evaluate(interface, true);
+    // Always clear out need_reconfigure_prefix when router_discovery_complete is set to true.
+    interface->need_reconfigure_prefix = false;
 }
 
 
@@ -2161,6 +2196,7 @@ interface_shutdown(interface_t *interface)
     interface->router_discovery_complete = false;
     interface->router_discovery_in_progress = false;
     interface->vicarious_router_discovery_in_progress = false;
+    interface->need_reconfigure_prefix = false;
 }
 
 static void
@@ -2357,6 +2393,13 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
                     INFO("ifaddr_callback: making all routers stale and start router discovery due to removed address");
                     adjust_router_received_time(interface, ioloop_timenow(),
                                                 -(MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE + MSEC_PER_SEC));
+                    // Explicitly set router_discovery_complete to false so we can ensure that srp-mdns-proxy will start
+                    // the router discovery immediately.
+                    interface->router_discovery_complete = false;
+                    // Set need_reconfigure_prefix to true to let routing_policy_evaluate know that the router discovery
+                    // is caused by interface removal event, so when the router discovery finished and nothing changes,
+                    // it can reconfigure the IPv6 routing in case configured does not handle it correctly.
+                    interface->need_reconfigure_prefix = true;
                     routing_policy_evaluate(interface, false);
                 }
             }
@@ -2419,6 +2462,7 @@ refresh_interface_list(void)
         }
     }
 
+#ifndef RA_TESTER
     // Notice if we have lost or gained infrastructure.
     if (have_active && !have_non_thread_interface) {
         INFO("refresh_interface_list: we have an active interface");
@@ -2430,6 +2474,7 @@ refresh_interface_list(void)
         // Stop advertising the service, if we are doing so.
         partition_discontinue_srp_service();
     }
+#endif // RA_TESTER
 }
 
 
@@ -2500,6 +2545,7 @@ thread_interface_done(void *UNUSED context, int status, const char *error)
         INFO("thread_interface_done: %d.", status);
     }
     ioloop_subproc_release(thread_interface_enumerator_process);
+    thread_interface_enumerator_process = NULL;
 }
 #endif // GET_TUNNEL_NAME_WITH_WPANCTL
 
@@ -3017,6 +3063,7 @@ tcpdump_done(void *UNUSED context, int status, const char *error)
         INFO("tcpdump_done: %d.", status);
     }
     ioloop_subproc_release(tcpdump_logger_process);
+    tcpdump_logger_process = NULL;
 }
 
 static void

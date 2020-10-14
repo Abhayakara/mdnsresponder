@@ -209,6 +209,12 @@ advertise_finished(comm_t *connection, message_t *message, int rcode, client_upd
         dns_u32_to_wire(&towire, client->host_lease);    // LEASE (e.g. 1 hour)
         dns_u32_to_wire(&towire, client->key_lease);     // KEY-LEASE (7 days)
         dns_edns0_option_end(&towire);                   // Now we know OPTION-LENGTH
+        if (!client->serial_sent) {
+            dns_u16_to_wire(&towire, dns_opt_srp_serial);    // OPTION-CODE
+            dns_edns0_option_begin(&towire);                 // OPTION-LENGTH
+            dns_u32_to_wire(&towire, client->serial_number); // LEASE (e.g. 1 hour)
+            dns_edns0_option_end(&towire);                   // Now we know OPTION-LENGTH
+        }
         dns_rdlength_end(&towire);
         // It should not be possible for this to happen; if it does, the client
         // might not renew its lease in a timely manner.
@@ -449,7 +455,9 @@ host_finalize(adv_host_t *host)
         } else {
             INFO("host_finalize: removing AAAA record(s) for " PRI_S_SRP, host->registered_name);
         }
+        ioloop_dnssd_txn_cancel(host->txn);
         ioloop_dnssd_txn_release(host->txn);
+        host->txn = NULL;
     } else {
         INFO("host_finalize: no host address transaction for " PRI_S_SRP, host->registered_name);
     }
@@ -463,7 +471,9 @@ host_finalize(adv_host_t *host)
         for (i = 0; i < host->instances->num; i++) {
             if (host->instances->vec[i] != NULL) {
                 if (host->instances->vec[i]->txn) {
+                    ioloop_dnssd_txn_cancel(host->instances->vec[i]->txn);
                     ioloop_dnssd_txn_release(host->instances->vec[i]->txn);
+                    host->instances->vec[i]->txn = NULL;
                 }
             }
         }
@@ -698,6 +708,30 @@ update_finished(adv_update_t *update)
     host->instances = instances;
 
     if (client) {
+        // If this is an update from a client, do the serial number processing.
+        if (client->serial_sent) {
+            INFO("update_finished: host " PRI_S_SRP " serial number %" PRIu32 "->%" PRIu32 " (from client)",
+                 host->name, host->serial_number, client->serial_number);
+            host->serial_number = client->serial_number;
+            host->have_serial_number = true;
+        } else {
+            // When the client doesn't know its serial number, and we have a recorded serial number, we want to make up a new
+            // serial number that's enough ahead of the old one that it's unlikely there's a higher number elsewhere from recent
+            // communications between the client and a server we're not currently able to reach.
+            if (host->have_serial_number) {
+                INFO("update_finished: host " PRI_S_SRP " serial number %" PRIu32 "->%" PRIu32 " (from history)",
+                     host->name, host->serial_number, host->serial_number + 50);
+                client->serial_number = host->serial_number + 50;
+                host->have_serial_number = true;
+            } else {
+                host->serial_number = (uint32_t)time(NULL);
+                client->serial_number = host->serial_number;
+                INFO("update_finished: host " PRI_S_SRP " serial number NONE->%" PRIu32 " (from time)",
+                     host->name, client->serial_number);
+                host->have_serial_number = true;
+            }
+        }
+
         advertise_finished(client->connection, client->message, dns_rcode_noerror, client);
         client_finalize(client);
         update->client = NULL;
@@ -1690,7 +1724,8 @@ compare_instance(adv_instance_t *instance,
 bool
 srp_update_start(comm_t *connection, dns_message_t *parsed_message, message_t *raw_message,
                  dns_host_description_t *new_host, service_instance_t *instances, service_t *services,
-                 dns_name_t *update_zone, uint32_t lease_time, uint32_t key_lease_time)
+                 dns_name_t *update_zone, uint32_t lease_time, uint32_t key_lease_time,
+                 uint32_t serial_number, bool found_serial)
 {
     adv_host_t *host, **p_hosts = NULL;
     char pres_name[DNS_MAX_NAME_SIZE_ESCAPED + 1];
@@ -1715,7 +1750,12 @@ srp_update_start(comm_t *connection, dns_message_t *parsed_message, message_t *r
     }
 
     // Log the update info.
-    INFO("srp_update_start: host update for " PRI_S_SRP ", key id %" PRIx32, new_host_name, key_id);
+    if (found_serial) {
+        INFO("srp_update_start: host update for " PRI_S_SRP ", key id %" PRIx32 ", serial number %" PRIu32,
+             new_host_name, key_id, serial_number);
+    } else {
+        INFO("srp_update_start: host update for " PRI_S_SRP ", key id %" PRIx32, new_host_name, key_id);
+    }
     for (addr = new_host->addrs; addr != NULL; addr = addr->next) {
         if (addr->rr.type == dns_rrtype_a) {
             IPv4_ADDR_GEN_SRP(&addr->rr.data.a.s_addr, addr_buf);
@@ -1958,6 +1998,8 @@ found_something:
     } else {
         client_update->key_lease = max_lease_time * 7;
     }
+    client_update->serial_number = serial_number;
+    client_update->serial_sent = found_serial;
     *p_client_update = client_update;
 
     // If we aren't already applying an update to this host, apply this update now.

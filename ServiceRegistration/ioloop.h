@@ -192,7 +192,7 @@ struct subproc {
 
 struct dnssd_txn {
 #ifndef IOLOOP_MACOS
-    io_t io;
+    io_t *io;
 #endif
     int ref_count;
     DNSServiceRef NULLABLE sdref;

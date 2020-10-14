@@ -597,7 +597,7 @@ udp_read_callback(io_t *io, void *context)
 #endif
         }
     }
-    connection->datagram_callback(connection, message, io->context);
+    connection->datagram_callback(connection, message, connection->context);
     RELEASE_HERE(message, message_finalize);
 }
 
@@ -1014,9 +1014,10 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
     if (listener == NULL) {
         return NULL;
     }
+    RETAIN_HERE(&listener->io);
     listener->name = strdup(name);
     if (!listener->name) {
-        free(listener);
+        RELEASE_HERE(&listener->io, comm_finalize);
         return NULL;
     }
     listener->io.fd = socket(real_family, stream ? SOCK_STREAM : SOCK_DGRAM, stream ? IPPROTO_TCP : IPPROTO_UDP);
@@ -1149,7 +1150,8 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
         }
     out:
         close(listener->io.fd);
-        free(listener);
+        listener->io.fd = -1;
+        RELEASE_HERE(&listener->io, comm_finalize);
         return NULL;
     }
 
@@ -1271,12 +1273,13 @@ ioloop_connection_create(addr_t *remote_address, bool tls, bool stream,
         ERROR("No memory for connection structure.");
         return NULL;
     }
+    RETAIN_HERE(&connection->io);
     if (inet_ntop(remote_address->sa.sa_family, (remote_address->sa.sa_family == AF_INET
                                                  ? (void *)&remote_address->sin.sin_addr
                                                  : (void *)&remote_address->sin6.sin6_addr), buf,
                   INET6_ADDRSTRLEN) == NULL) {
         ERROR("inet_ntop failed to convert remote address: %s", strerror(errno));
-        free(connection);
+        RELEASE_HERE(&connection->io, comm_finalize);
         return NULL;
     }
     s = buf + strlen(buf);
@@ -1285,7 +1288,7 @@ ioloop_connection_create(addr_t *remote_address, bool tls, bool stream,
                               : remote_address->sin6.sin6_port));
     connection->name = strdup(buf);
     if (!connection->name) {
-        free(connection);
+        RELEASE_HERE(&connection->io, comm_finalize);
         return NULL;
     }
     connection->io.fd = socket(remote_address->sa.sa_family,
@@ -1347,15 +1350,6 @@ ioloop_connection_create(addr_t *remote_address, bool tls, bool stream,
 }
 
 static void
-subproc_output_finalize(void *context)
-{
-    subproc_t *subproc = context;
-    if (subproc->output_fd) {
-        subproc->output_fd = NULL;
-    }
-}
-
-static void
 subproc_finalize(subproc_t *subproc)
 {
     int i;
@@ -1372,6 +1366,16 @@ subproc_finalize(subproc_t *subproc)
         subproc->finalize(subproc->context);
     }
     free(subproc);
+}
+
+static void
+subproc_output_finalize(void *context)
+{
+    subproc_t *subproc = context;
+    if (subproc->output_fd) {
+        subproc->output_fd = NULL;
+    }
+    RELEASE_HERE(subproc, subproc_finalize);
 }
 
 void
@@ -1416,6 +1420,8 @@ ioloop_subproc(const char *exepath, char **argv, int argc, subproc_callback_t ca
         }
         subproc->output_fd = ioloop_file_descriptor_create(subproc->pipe_fds[0], subproc, subproc_output_finalize);
         if (subproc->output_fd == NULL) {
+            // subproc->output_fd holds a reference to subproc.
+            RETAIN_HERE(subproc);
             callback(NULL, 0, "out of memory.");
             close(subproc->pipe_fds[0]);
             close(subproc->pipe_fds[1]);
@@ -1474,6 +1480,40 @@ ioloop_subproc(const char *exepath, char **argv, int argc, subproc_callback_t ca
 }
 
 #ifndef EXCLUDE_DNSSD_TXN_SUPPORT
+static void
+dnssd_txn_callback(io_t *io, void *context)
+{
+    dnssd_txn_t *txn = (dnssd_txn_t *)context;
+    int status = DNSServiceProcessResult(txn->sdref);
+    if (status != kDNSServiceErr_NoError) {
+        if (txn->failure_callback != NULL) {
+            txn->failure_callback(txn->context, status);
+        } else {
+            INFO("dnssd_txn_callback: status %d", status);
+        }
+        ioloop_dnssd_txn_cancel(txn);
+    }
+}
+
+void
+dnssd_txn_finalize(dnssd_txn_t *txn)
+{
+    if (txn->sdref != NULL) {
+        ioloop_dnssd_txn_cancel(txn);
+    }
+    if (txn->finalize_callback) {
+        txn->finalize_callback(txn->context);
+    }
+}
+
+void
+dnssd_txn_io_finalize(void *context)
+{
+    dnssd_txn_t *txn = context;
+    txn->io = NULL;
+    RELEASE_HERE(txn, dnssd_txn_finalize);
+}
+
 void
 ioloop_dnssd_txn_cancel(dnssd_txn_t *txn)
 {
@@ -1483,30 +1523,9 @@ ioloop_dnssd_txn_cancel(dnssd_txn_t *txn)
     } else {
         INFO("ioloop_dnssd_txn_cancel: dead transaction.");
     }
-}
-
-static void
-dnssd_txn_callback(io_t *io, void *context)
-{
-    dnssd_txn_t *txn = (dnssd_txn_t *)io;
-    int status = DNSServiceProcessResult(txn->sdref);
-    (void)context;
-    if (status != kDNSServiceErr_NoError) {
-        if (txn->failure_callback != NULL) {
-            txn->failure_callback(txn->context, status);
-        } else {
-            INFO("dnssd_txn_callback: status %d", status);
-        }
-    }
-}
-
-void
-dnssd_txn_finalize(io_t *io)
-{
-    dnssd_txn_t *txn = (dnssd_txn_t *)io;
-
-    if (txn->finalize_callback) {
-        txn->finalize_callback(txn->context);
+    if (txn->io != NULL) {
+        txn->io->fd = -1;
+        RELEASE_HERE(txn->io, dnssd_txn_io_finalize);
     }
 }
 
@@ -1514,14 +1533,14 @@ void
 ioloop_dnssd_txn_retain_(dnssd_txn_t *dnssd_txn, const char *file, int line)
 {
     (void)file; (void)line;
-    RETAIN(&dnssd_txn->io);
+    RETAIN(dnssd_txn);
 }
 
 void
 ioloop_dnssd_txn_release_(dnssd_txn_t *dnssd_txn, const char *file, int line)
 {
     (void)file; (void)line;
-    RELEASE(&dnssd_txn->io, dnssd_txn_finalize);
+    RELEASE(dnssd_txn, dnssd_txn_finalize);
 }
 
 dnssd_txn_t *
@@ -1533,11 +1552,17 @@ ioloop_dnssd_txn_add_(DNSServiceRef ref, void *context,
     if (txn != NULL) {
         RETAIN(txn);
         txn->sdref = ref;
-        txn->io.fd = DNSServiceRefSockFD(txn->sdref);
+        txn->io = ioloop_file_descriptor_create(DNSServiceRefSockFD(txn->sdref), txn, dnssd_txn_io_finalize);
+        if (txn->io == NULL) {
+            RELEASE_HERE(txn, dnssd_txn_finalize);
+            return NULL;
+        }
+        // io holds a reference to txn
+        RETAIN_HERE(txn);
         txn->finalize_callback = callback;
         txn->failure_callback = failure_callback;
         txn->context = context;
-        ioloop_add_reader(&txn->io, dnssd_txn_callback);
+        ioloop_add_reader(txn->io, dnssd_txn_callback);
     }
     return txn;
 }

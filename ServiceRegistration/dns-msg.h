@@ -347,6 +347,7 @@ struct dns_message {
 #define dns_opt_padding       12 // [RFC7830]
 #define dns_opt_chain         13 // [RFC7901]
 #define dns_opt_key_tag       14 // [RFC8145]
+#define dns_opt_srp_serial 65186 // ???
 
 // towire.c:
 
