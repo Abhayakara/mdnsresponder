@@ -4316,6 +4316,7 @@ partition_maybe_advertise_service(void)
     }
     if (i == 16) {
         INFO("partition_maybe_advertise_service: no listener.");
+        return;
     }
 
     // The add service function requires a remove prior to the add, so if we are doing an add, we need to wait
