@@ -64,9 +64,6 @@
 #include <network_information.h>
 
 #include <CoreUtils/CoreUtils.h>
-#if defined(RC_SEED_BUILD)
-#define RA_TESTER 1
-#endif
 #endif // IOLOOP_MACOS
 
 #include "srp.h"

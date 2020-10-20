@@ -155,7 +155,7 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
                 if (nif != NULL) {
                     nif->name = (char *)(nif + 1);
                     memcpy(nif->name, ifp->ifa_name, len);
-                    nif->name[len + 1] = 0;
+                    nif->name[len] = 0;
                     if (ifp->ifa_addr->sa_family == AF_INET) {
                         nif->addr.sin = *((struct sockaddr_in *)ifp->ifa_addr);
                         nif->mask.sin = *((struct sockaddr_in *)ifp->ifa_netmask);
