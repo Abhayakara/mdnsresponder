@@ -24,6 +24,10 @@
 #include <stdbool.h>
 #include "cti-common.h"
 
+#ifndef NO_IOLOOP
+#define NO_IOLOOP 1
+#endif
+
 typedef struct cti_buffer cti_buffer_t;
 struct cti_buffer {
 	size_t expected;
