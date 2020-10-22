@@ -28,10 +28,6 @@
 #define CTI_EVENT_PARTITION_ID (1 << 4)
 #define CTI_EVENT_STATE        (1 << 5)
 
-#ifndef NO_IOLOOP
-#define NO_IOLOOP 1
-#endif
-
 #ifndef NOT_HAVE_SA_LEN
 #define NOT_HAVE_SA_LEN 1
 #endif
