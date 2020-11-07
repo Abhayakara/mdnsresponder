@@ -1166,7 +1166,7 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
         for (addr = interfaces; addr; addr = addr->next) {
             // If we have an IPv6 address that's on the same prefix as the server's address, send only that
             // IPv6 address.
-            if (addr->rr.type != dns_rrtype_aaaa ||
+            if (addr->rr.type == dns_rrtype_aaaa &&
                 (addr->rr.type == server->rr.type && !memcmp(&addr->rr.data, &server->rr.data, 8)))
             {
                 have_good_address = true;
@@ -1185,6 +1185,10 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
             if (have_good_address) {
                 break;
             }
+        }
+
+        if (have_good_address) {
+            break;
         }
     }
 
