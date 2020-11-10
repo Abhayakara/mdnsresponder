@@ -103,7 +103,7 @@ $(BUILDDIR)/dnssd-relay:  $(OBJDIR)/dnssd-relay.o $(DSOOBJS) $(IOOBJS) $(CFOBJS)
 $(BUILDDIR)/dnssd-proxy:  $(OBJDIR)/dnssd-proxy.o $(SIMPLEOBJS) $(DSOOBJS) $(MDNSOBJS) $(FROMWIREOBJS) $(IOOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
-$(BUILDDIR)/srp-client:	$(OBJDIR)/srp-ioloop.o $(OBJDIR)/srp-client.o $(CTIOBJS) $(SIMPLEOBJS) $(IOWOTLSOBJS) $(CFOBJS)
+$(BUILDDIR)/srp-client:	$(OBJDIR)/srp-ioloop.o $(OBJDIR)/srp-client.o $(OBJDIR)/dnssd_clientlib.o $(CTIOBJS) $(SIMPLEOBJS) $(IOWOTLSOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(BUILDDIR)/srp-dns-proxy:	$(OBJDIR)/srp-dns-proxy.o $(OBJDIR)/srp-parse.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
@@ -122,6 +122,9 @@ $(OBJDIR)/dso.o:	../DSO/dso.c
 	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. -I../mDNSShared $<
 
 $(OBJDIR)/dnssd_clientstub.o:  ../mDNSShared/dnssd_clientstub.c
+	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. -I../mDNSShared $<
+
+$(OBJDIR)/dnssd_clientlib.o:  ../mDNSShared/dnssd_clientlib.c
 	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. -I../mDNSShared $<
 
 $(OBJDIR)/dnssd_ipc.o:  ../mDNSShared/dnssd_ipc.c

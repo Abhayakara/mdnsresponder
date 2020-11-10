@@ -17,6 +17,12 @@
 #import "Metrics.h"
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, METRICS)
+
+#import "DNSCommon.h"
+#import "mDNSMacOSX.h"
+#import "DebugServices.h"
+#import "mdns_strict.h"
+
 #import <CoreUtils/SoftLinking.h>
 #import <WirelessDiagnostics/AWDDNSDomainStats.h>
 #import <WirelessDiagnostics/AWDMDNSResponderDNSMessageSizeStats.h>
@@ -24,10 +30,6 @@
 #import <WirelessDiagnostics/AWDMDNSResponderServicesStats.h>
 #import <WirelessDiagnostics/AWDMetricIds_MDNSResponder.h>
 #import <WirelessDiagnostics/WirelessDiagnostics.h>
-
-#import "DNSCommon.h"
-#import "mDNSMacOSX.h"
-#import "DebugServices.h"
 
 //===========================================================================================================================
 //  External Frameworks
@@ -67,7 +69,6 @@ SOFT_LINK_CLASS(WirelessDiagnostics, AWDMDNSResponderDNSMessageSizeStats)
 
 #define countof(X)                      (sizeof(X) / sizeof(X[0]))
 #define countof_field(TYPE, FIELD)      countof(((TYPE *)0)->FIELD)
-#define ForgetMem(X)                    do {if(*(X)) {free(*(X)); *(X) = NULL;}} while(0)
 
 //===========================================================================================================================
 //  Constants
@@ -307,9 +308,12 @@ mStatus MetricsInit(void)
 {
     @autoreleasepool
     {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wobjc-messaging-id"
         gAWDServerConnection = [[AWDServerConnectionSoft alloc]
             initWithComponentId:     AWDComponentId_MDNSResponder
             andBlockOnConfiguration: NO];
+#pragma GCC diagnostic pop
 
         if (gAWDServerConnection)
         {
@@ -458,7 +462,7 @@ mDNSlocal mStatus QueryStatsCreate(const char *inDomainStr, const char *inAltDom
     mStatus             err;
     QueryStats *        obj;
 
-    obj = (QueryStats *)calloc(1, sizeof(*obj));
+    obj = (QueryStats *)mdns_calloc(1, sizeof(*obj));
     require_action_quiet(obj, exit, err = mStatus_NoMemoryErr);
 
     obj->domainStr = inDomainStr;
@@ -498,7 +502,7 @@ mDNSlocal mStatus StringToDomainName(const char *inString, uint8_t **outDomainNa
     }
     domainLen = DomainNameLength(&domain);
 
-    domainPtr = (uint8_t *)malloc(domainLen);
+    domainPtr = (uint8_t *)mdns_malloc(domainLen);
     require_action_quiet(domainPtr, exit, err = mStatus_NoMemoryErr);
 
     memcpy(domainPtr, domain.c, domainLen);
@@ -517,22 +521,22 @@ exit:
 
 mDNSlocal void QueryStatsFree(QueryStats *inStats)
 {
-    ForgetMem(&inStats->domain);
+    mdns_free(inStats->domain);
     if (inStats->nonCellular)
     {
-        ForgetMem(&inStats->nonCellular->histA);
-        ForgetMem(&inStats->nonCellular->histAAAA);
-        free(inStats->nonCellular);
+        mdns_free(inStats->nonCellular->histA);
+        mdns_free(inStats->nonCellular->histAAAA);
+        mdns_free(inStats->nonCellular);
         inStats->nonCellular = NULL;
     }
     if (inStats->cellular)
     {
-        ForgetMem(&inStats->cellular->histA);
-        ForgetMem(&inStats->cellular->histAAAA);
-        free(inStats->cellular);
+        mdns_free(inStats->cellular->histA);
+        mdns_free(inStats->cellular->histAAAA);
+        mdns_free(inStats->cellular);
         inStats->cellular = NULL;
     }
-    free(inStats);
+    mdns_free(inStats);
 }
 
 //===========================================================================================================================
@@ -569,14 +573,14 @@ mDNSlocal mStatus QueryStatsUpdate(QueryStats *inStats, int inType, const Resour
     pSet = inForCell ? &inStats->cellular : &inStats->nonCellular;
     if ((set = *pSet) == NULL)
     {
-        set = (DNSHistSet *)calloc(1, sizeof(*set));
+        set = (DNSHistSet *)mdns_calloc(1, sizeof(*set));
         require_action_quiet(set, exit, err = mStatus_NoMemoryErr);
         *pSet = set;
     }
     pHist = (inType == kDNSType_A) ? &set->histA : &set->histAAAA;
     if ((hist = *pHist) == NULL)
     {
-        hist = (DNSHist *)calloc(1, sizeof(*hist));
+        hist = (DNSHist *)mdns_calloc(1, sizeof(*hist));
         require_action_quiet(hist, exit, err = mStatus_NoMemoryErr);
         *pHist = hist;
     }
@@ -755,7 +759,7 @@ mDNSlocal mStatus DNSMessageSizeStatsCreate(DNSMessageSizeStats **outStats)
     mStatus                     err;
     DNSMessageSizeStats *       stats;
 
-    stats = (DNSMessageSizeStats *)calloc(1, sizeof(*stats));
+    stats = (DNSMessageSizeStats *)mdns_calloc(1, sizeof(*stats));
     require_action_quiet(stats, exit, err = mStatus_NoMemoryErr);
 
     *outStats = stats;
@@ -771,7 +775,7 @@ exit:
 
 mDNSlocal void DNSMessageSizeStatsFree(DNSMessageSizeStats *inStats)
 {
-    free(inStats);
+    mdns_free(inStats);
 }
 
 //===========================================================================================================================
@@ -870,7 +874,10 @@ mDNSlocal mStatus SubmitAWDMetricQueryStats(void)
     container = [gAWDServerConnection newMetricContainerWithIdentifier:AWDMetricId_MDNSResponder_DNSStatistics];
     require_action_quiet(container, exit, err = mStatus_UnknownErr);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wobjc-messaging-id"
     metric = [[AWDMDNSResponderDNSStatisticsSoft alloc] init];
+#pragma GCC diagnostic pop
     require_action_quiet(metric, exit, err = mStatus_UnknownErr);
 
     while ((stats = statsList) != NULL)
@@ -961,7 +968,10 @@ mDNSlocal mStatus SubmitAWDMetricDNSMessageSizeStats(void)
     container = [gAWDServerConnection newMetricContainerWithIdentifier:AWDMetricId_MDNSResponder_DNSMessageSizeStats];
     require_action_quiet(container, exit, err = mStatus_UnknownErr);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wobjc-messaging-id"
     metric = [[AWDMDNSResponderDNSMessageSizeStatsSoft alloc] init];
+#pragma GCC diagnostic pop
     require_action_quiet(metric, exit, err = mStatus_UnknownErr);
 
     if (stats)
@@ -1005,7 +1015,10 @@ mDNSlocal mStatus CreateAWDDNSDomainStats(DNSHist *inHist, const char *inDomain,
     uint32_t                expiredAnswerBins[kQueryStatsExpiredAnswerStateCount];
     uint32_t                dnsOverTCPBins[kQueryStatsDNSOverTCPStateCount];
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wobjc-messaging-id"
     awdStats = [[AWDDNSDomainStatsSoft alloc] init];
+#pragma GCC diagnostic pop
     require_action_quiet(awdStats, exit, err = mStatus_UnknownErr);
 
     domain = [[NSString alloc] initWithUTF8String:inDomain];

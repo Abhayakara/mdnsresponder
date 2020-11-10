@@ -167,7 +167,7 @@ dns_service_discovery_ref DNSServiceResolverResolve
 /*!
     @function DNSServiceDiscoveryMachPort
     @discussion Returns the mach port for a dns_service_discovery_ref
-    @param registration A dns_service_discovery_ref as returned from DNSServiceRegistrationCreate
+    @param dnsServiceDiscovery A dns_service_discovery_ref as returned from DNSServiceRegistrationCreate
     @result A mach reply port which will be sent messages as appropriate.
         These messages should be passed to the DNSServiceDiscovery_handleReply
         function.  A NULL value indicates that no address was
@@ -180,7 +180,6 @@ mach_port_t DNSServiceDiscoveryMachPort(dns_service_discovery_ref dnsServiceDisc
     @function DNSServiceDiscoveryDeallocate
     @discussion Deallocates the DNS Service Discovery type / closes the connection to the server
     @param dnsServiceDiscovery A dns_service_discovery_ref as returned from a creation or enumeration call
-    @result void
  */
 void DNSServiceDiscoveryDeallocate(dns_service_discovery_ref dnsServiceDiscovery) API_DEPRECATED(kDNSServiceDiscoveryDeprecatedMsg, macos(10.2, 10.3));
 

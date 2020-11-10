@@ -4,8 +4,7 @@
 
 #include "DNSServerDNSSEC.h"
 
-#include "DNSMessage.h"
-
+#include <mdns/DNSMessage.h>
 #include <Security/SecKeyPriv.h>
 
 //===========================================================================================================================
@@ -3321,7 +3320,6 @@ uint16_t	DNSKeyInfoGetKeyTag( const DNSKeyInfoRef inKeyInfo )
 
 //===========================================================================================================================
 
-#define SHA1_OUTPUT_SIZE		20
 #define SHA256_OUTPUT_SIZE		32
 #define SHA384_OUTPUT_SIZE		48
 

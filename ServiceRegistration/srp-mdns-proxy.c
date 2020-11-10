@@ -961,6 +961,7 @@ start_service_updates(adv_host_t *host)
     for (i = 0; i < host->instances->num; i++) {
         if (update->update_instances->vec[i] != NULL || update->remove_instances->vec[i] != NULL) {
             if (host->instances->vec[i]->txn != NULL) {
+                ioloop_dnssd_txn_cancel(host->instances->vec[i]->txn);
                 ioloop_dnssd_txn_release(host->instances->vec[i]->txn);
                 host->instances->vec[i]->txn = NULL;
             }
@@ -1388,6 +1389,7 @@ start_host_update(adv_host_t *host)
     // of the same type.   We can't use that, so we just remove the record (if it exists) and then add
     // the intended record.
     if (remove_preexisting && host->txn != NULL) {
+        ioloop_dnssd_txn_cancel(host->txn);
         ioloop_dnssd_txn_release(host->txn);
         host->txn = NULL;
     }

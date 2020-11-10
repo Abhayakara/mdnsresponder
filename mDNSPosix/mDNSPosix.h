@@ -37,7 +37,7 @@ struct PosixNetworkInterface
 {
     NetworkInterfaceInfo coreIntf;      // MUST be the first element in this structure
     mDNSs32 LastSeen;
-    const char *            intfName;
+    char *                  intfName;
     PosixNetworkInterface * aliasIntf;
     int index;
     int multicastSocket4;

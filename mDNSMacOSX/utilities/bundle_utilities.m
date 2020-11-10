@@ -14,11 +14,12 @@
 * limitations under the License.
 */
 
-#if !defined(__i386__)
 #include "bundle_utilities.h"
 
+#if !defined(__i386__)
 #import <CoreServices/CoreServicesPriv.h>
 #import <CoreUtils/SoftLinking.h>
+#import "mdns_strict.h"
 
 SOFT_LINK_FRAMEWORK_EX(Frameworks, CoreServices);
 SOFT_LINK_CLASS_EX(CoreServices, LSBundleRecord);
@@ -41,7 +42,7 @@ bool bundle_sdk_is_ios14_or_later(void)
 
 	if (LSBundleRecordSoft && NSStringSoft) {
 		@autoreleasepool {
-			id rec = [LSBundleRecordSoft bundleRecordForCurrentProcess];
+			LSBundleRecord * rec = [LSBundleRecordSoft bundleRecordForCurrentProcess];
 			if (rec) {
 				NSString * min_vers = [NSStringSoft stringWithUTF8String:MIN_SDK_VERSION];
 				NSComparisonResult compare_result = [[rec SDKVersion] compare:min_vers options:NSNumericSearch];
@@ -52,4 +53,9 @@ bool bundle_sdk_is_ios14_or_later(void)
 
 	return (result != NO);
 }
-#endif
+#else // __i386__
+bool bundle_sdk_is_ios14_or_later(void)
+{
+	return false;
+}
+#endif // __i386__

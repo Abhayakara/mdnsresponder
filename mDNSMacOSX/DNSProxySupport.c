@@ -16,6 +16,7 @@
 
 #include "mDNSEmbeddedAPI.h"
 #include "mDNSMacOSX.h"
+#include "mdns_strict.h"
 
 #include <sys/types.h>
 #include <sys/time.h>

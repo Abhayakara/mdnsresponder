@@ -21,6 +21,7 @@
 #include "dnsproxy.h"                   // DNSProxyInit/ProxyUDPCallback/ProxyTCPCallback
 #include "xpc_service_dns_proxy.h"      // init_dnsproxy_service
 #include "xpc_service_log_utility.h"    // init_dnsctl_service
+#include "mdns_strict.h"
 
 extern mDNS mDNSStorage;
 
@@ -42,7 +43,7 @@ mDNSexport mDNSBool IsEntitled(xpc_connection_t conn, const char *entitlement_na
         if (xpc_get_type(entitled_obj) == XPC_TYPE_BOOL && xpc_bool_get_value(entitled_obj)) {
             entitled = mDNStrue;
         }
-        xpc_release(entitled_obj);
+        MDNS_DISPOSE_XPC(entitled_obj);
     } else {
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "IsEntitled: Client Entitlement is NULL");
     }

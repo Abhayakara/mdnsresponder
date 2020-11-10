@@ -18,6 +18,7 @@
 
 #include "DNSCommon.h"
 #include "uDNS.h"
+#include "mdns_strict.h"
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 #include "QuerierSupport.h"

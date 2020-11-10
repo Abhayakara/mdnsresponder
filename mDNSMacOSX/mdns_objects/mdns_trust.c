@@ -16,16 +16,16 @@
 
 #include "mDNSFeatures.h"
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
+//#if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
 
 #include "mdns_trust.h"
 #include "mdns_trust_checks.h"
-#include "mdns_objects.h"
-#include "mdns_helpers.h"
-#include "dns_sd.h"
+#include "objects.h"
+#include "helpers.h"
 
 #include <bsm/libbsm.h>
 #include <CoreUtils/DebugServices.h>
+#include "mdns_strict.h"
 
 //======================================================================================================================
 // MARK: - mdns_trust Kind Definition
@@ -87,7 +87,7 @@ static void
 _mdns_trust_finalize(mdns_trust_t me)
 {
 	dispatch_forget(&me->queue);
-	dispatch_release_null_safe(me->user_queue);
+	dispatch_forget(&me->user_queue);
 	ForgetMem(&me->query);
 	BlockForget(&me->handler);
 }
@@ -114,7 +114,7 @@ _mdns_trust_copy_description(mdns_trust_t me, const bool debug, const bool __unu
 	n = mdns_snprintf_add(&dst, lim, "for pid %d", audit_token_to_pid(me->audit_token));
 	require_quiet(n >= 0, exit);
 
-	description = strdup(buffer);
+	description = mdns_strdup(buffer);
 
 exit:
 	return description;
@@ -181,7 +181,8 @@ mdns_trust_create(audit_token_t audit_token, const char *_Nullable query, mdns_t
 	obj->audit_token	= audit_token;
 	obj->flags			= flags;
 	if (query != NULL) {
-		obj->query		= strdup(query);
+		const char * const tmp = query;
+		obj->query		= mdns_strdup(tmp);
 	}
 	op					= obj;
 	return op;
@@ -244,9 +245,9 @@ mdns_trust_set_event_handler(mdns_trust_t me, mdns_trust_event_handler_t handler
 {
 	const mdns_trust_event_handler_t new_handler = handler ? Block_copy(handler) : NULL;
 	if (me->handler) {
-		Block_release(me->handler);
+		MDNS_DISPOSE_BLOCK(me->handler);
 	}
 	me->handler = new_handler;
 }
 
-#endif // MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
+//#endif // MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)

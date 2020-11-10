@@ -26,6 +26,7 @@
  */
 
 #include "dnssd_ipc.h"
+#include "mdns_strict.h"
 
 #if defined(_WIN32)
 
@@ -71,7 +72,7 @@ uint32_t get_uint32(const char **ptr, const char *end)
     }
     else
     {
-        uint8_t *p = (uint8_t*) *ptr;
+        const uint8_t *p = (const uint8_t*) *ptr;
         *ptr += sizeof(uint32_t);
         return((uint32_t) ((uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]));
     }
@@ -93,7 +94,7 @@ uint16_t get_uint16(const char **ptr, const char *end)
     }
     else
     {
-        uint8_t *p = (uint8_t*) *ptr;
+        const uint8_t *p = (const uint8_t*) *ptr;
         *ptr += sizeof(uint16_t);
         return((uint16_t) ((uint16_t)p[0] << 8 | p[1]));
     }

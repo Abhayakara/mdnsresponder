@@ -26,13 +26,14 @@
 #endif
 
 #include "mDNSEmbeddedAPI.h"
+#include "mdns_strict.h"
 
 mDNSexport int mDNS_LoggingEnabled       = 0;
 mDNSexport int mDNS_PacketLoggingEnabled = 0;
 mDNSexport int mDNS_McastLoggingEnabled  = 0;
-mDNSexport int mDNS_McastTracingEnabled  = 0; 
+mDNSexport int mDNS_McastTracingEnabled  = 0;
 
-#if MDNS_DEBUGMSGS
+#if MDNS_DEBUGMSGS && defined(__APPLE__)
 mDNSexport int mDNS_DebugMode = mDNStrue;
 #else
 mDNSexport int mDNS_DebugMode = mDNSfalse;
@@ -46,7 +47,7 @@ mDNSexport void verbosedebugf_(const char *format, ...)
     char buffer[512];
     va_list args;
     va_start(args, format);
-    buffer[mDNS_vsnprintf(buffer, sizeof(buffer), format, args)] = 0;
+    mDNS_vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
     mDNSPlatformWriteDebugMsg(buffer);
 }
@@ -90,7 +91,7 @@ void LogDebug_(const char *format, ...)     LOG_HELPER_BODY(NULL, MDNS_LOG_DEBUG
 #endif
 
 #if MDNS_DEBUGMSGS
-void debugf_(const char *format, ...)       LOG_HELPER_BODY(MDNS_LOG_DEBUG)
+void debugf_(const char *format, ...)       LOG_HELPER_BODY(NULL, MDNS_LOG_DEBUG)
 #endif
 
 // Log message with default "mDNSResponder" ident string at the start

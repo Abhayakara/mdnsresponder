@@ -1,5 +1,6 @@
-/*
- * Copyright (c) 2003-2019 Apple Inc. All rights reserved.
+/* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
+ *
+ * Copyright (c) 2003-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -100,14 +101,13 @@ static void Reconfigure(mDNS *m)
 }
 
 // Do appropriate things at startup with command line arguments. Calls exit() if unhappy.
-mDNSlocal void ParseCmdLinArgs(int argc, char **argv)
+mDNSlocal void ParseCmdLineArgs(int argc, char **argv)
 {
     if (argc > 1)
     {
         if (0 == strcmp(argv[1], "-debug")) mDNS_DebugMode = mDNStrue;
         else printf("Usage: %s [-debug]\n", argv[0]);
     }
-
     if (!mDNS_DebugMode)
     {
         int result = daemon(0, 0);
@@ -123,7 +123,7 @@ mDNSlocal void DumpStateLog()
 // Dump a little log of what we've been up to.
 {
     char timestamp[64]; // 64 is enough to store the UTC timestmp
-    
+
     mDNSu32 major_version = _DNS_SD_H / 10000;
     mDNSu32 minor_version1 = (_DNS_SD_H - major_version * 10000) / 100;
     mDNSu32 minor_version2 = _DNS_SD_H % 100;
@@ -183,7 +183,7 @@ int main(int argc, char **argv)
 {
     mStatus err;
 
-    ParseCmdLinArgs(argc, argv);
+    ParseCmdLineArgs(argc, argv);
 
     LogMsg("%s starting", mDNSResponderVersionString);
 

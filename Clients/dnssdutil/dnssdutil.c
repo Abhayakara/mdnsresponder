@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-#include "DNSMessage.h"
 #include "DNSServerDNSSEC.h"
 
 #include <CoreUtils/CoreUtils.h>
 #include <dns_sd.h>
 #include <dns_sd_private.h>
+#include <mdns/DNSMessage.h>
 #include <pcap.h>
 
 #include CF_RUNTIME_HEADER
@@ -59,7 +59,7 @@
 	#include <CoreFoundation/CFXPCBridge.h>
 	#include <dns_services.h>
 	#include "dnssd_private.h"
-	#include "mdns_private.h"
+	#include <mdns/private.h>
 	#include "TestUtils.h"
 	// Set ENABLE_DNSSDUTIL_DNSSEC_TEST to 1 to enable DNSSEC test functionality.
 	#define ENABLE_DNSSDUTIL_DNSSEC_TEST 0

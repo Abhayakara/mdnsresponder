@@ -27,6 +27,7 @@
 #include "xpc_service_log_utility.h"
 #include "xpc_clients.h"
 #include "system_utilities.h"			// IsAppleInternalBuild
+#include "mdns_strict.h"
 
 #define STATE_DUMP_PLAIN_SUFFIX "txt"
 #define STATE_DUMP_COMPRESSED_SUFFIX "tar.bz2"
@@ -49,26 +50,26 @@ mDNSlocal mDNSs8
 check_permission(xpc_connection_t connection);
 
 mDNSlocal mDNSs8
-handle_state_dump(mDNSu32 dump_option, char *full_file_name, mDNSu32 name_buffer_len, int client_fd,
+handle_state_dump(mDNSu32 dump_option, char *full_file_name, mDNSu32 name_buffer_size, int client_fd,
 	mDNSs32 *time_ms_used);
 
 mDNSlocal mDNSs32
-find_oldest_state_dump(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 buffer_len,
-	char *oldest_file_name);
+find_oldest_state_dump(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 buffer_size,
+	char *oldest_file_name, mDNSu32 oldest_file_name_buffer_size);
 
 mDNSlocal mDNSs8
 remove_state_dump_if_too_many(const char *dump_dir, const char *oldest_file_name, mDNSs32 dump_file_count,
 	mDNSs32 max_allowed);
 
 mDNSlocal int
-create_new_state_dump_file(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 buffer_len);
+create_new_state_dump_file(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 buffer_size);
 
 mDNSlocal mDNSs8
-handle_state_dump_to_fd(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 buffer_len,
+handle_state_dump_to_fd(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 buffer_size,
 	mDNSBool if_compress);
 
 mDNSlocal mDNSs8
-compress_state_dump_and_delete(char *input_file, mDNSu32 buffer_len);
+compress_state_dump_and_delete(char *input_file, mDNSu32 buffer_size);
 
 mDNSlocal mDNSs32
 timediff_ms(struct timeval *t1, struct timeval *t2);
@@ -114,7 +115,8 @@ accept_client(xpc_connection_t conn)
 			handle_requests(req_msg);
 		} else { // We hit this case ONLY if Client Terminated Connection OR Crashed
 			LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_DEFAULT, "C%p {status='client closed the connection'}", conn);
-			xpc_release(conn);
+			xpc_connection_t tmp = conn;
+			MDNS_DISPOSE_XPC(tmp);
 		}
 	});
 
@@ -180,7 +182,7 @@ handle_requests(xpc_object_t req)
 
 	xpc_dictionary_set_uint64(response, kDNSDaemonReply, reply_value);
 	xpc_connection_send_message(remote_conn, response);
-	xpc_release(response);
+	MDNS_DISPOSE_XPC(response);
 
 	return 0;
 }
@@ -213,7 +215,7 @@ check_permission(xpc_connection_t connection)
  * blocked. if_get_lock indicates if we should lock the kqueue before dumping the state.
  */
 mDNSlocal mDNSs8
-handle_state_dump(mDNSu32 dump_option, char *full_file_name, mDNSu32 name_buffer_len, int client_fd,
+handle_state_dump(mDNSu32 dump_option, char *full_file_name, mDNSu32 name_buffer_size, int client_fd,
 	mDNSs32 *time_ms_used)
 {
 	mDNSs8 ret;
@@ -229,7 +231,7 @@ handle_state_dump(mDNSu32 dump_option, char *full_file_name, mDNSu32 name_buffer
 	} else {
 		// dump_option == full_state || dump_option == full_state_with_compression
 		ret = handle_state_dump_to_fd(MDSNRESPONDER_STATE_DUMP_DIR, MDSNRESPONDER_STATE_DUMP_FILE_NAME,
-			full_file_name, name_buffer_len, dump_option == full_state_with_compression ? mDNStrue : mDNSfalse);
+			full_file_name, name_buffer_size, dump_option == full_state_with_compression ? mDNStrue : mDNSfalse);
 	}
 
 	// unlock the kqueue, record the end time and calculate the duration.
@@ -243,14 +245,15 @@ handle_state_dump(mDNSu32 dump_option, char *full_file_name, mDNSu32 name_buffer
 
 #define MAX_NUM_DUMP_FILES 5 // controls how many files we are allowed to created for the state dump
 mDNSlocal mDNSs8
-handle_state_dump_to_fd(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 buffer_len,
+handle_state_dump_to_fd(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 buffer_size,
 	mDNSBool if_compress){
 
 	char			oldest_file_name[PATH_MAX];
 	mDNSs32			dump_file_count = 0;
 	int				ret;
 
-	dump_file_count = find_oldest_state_dump(dump_dir, file_name, full_file_name, buffer_len, oldest_file_name);
+	dump_file_count = find_oldest_state_dump(dump_dir, file_name, full_file_name, buffer_size, oldest_file_name,
+		sizeof(oldest_file_name));
 	require_action(dump_file_count >= 0, error,
 		LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_DEBUG, "find_oldest_state_dump fails"));
 
@@ -258,7 +261,7 @@ handle_state_dump_to_fd(const char *dump_dir, const char *file_name, char *full_
 	require_action(ret == 0, error,
 		LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_DEBUG, "remove_state_dump_if_too_many fails"));
 
-	int fd = create_new_state_dump_file(dump_dir, file_name, full_file_name, buffer_len);
+	int fd = create_new_state_dump_file(dump_dir, file_name, full_file_name, buffer_size);
 	require_action(fd >= 0, error,
 		LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_DEBUG, "create_new_state_dump_file fails"));
 
@@ -266,7 +269,7 @@ handle_state_dump_to_fd(const char *dump_dir, const char *file_name, char *full_
 	close(fd); // create_new_state_dump_file open the file, we have to close it here
 
 	if (if_compress) {
-		ret = compress_state_dump_and_delete(full_file_name, buffer_len);
+		ret = compress_state_dump_and_delete(full_file_name, buffer_size);
 		require_action(ret == 0, error,
 			LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_DEFAULT, "State Dump: Error happens when trying to compress the state dump, reason: %s", strerror(errno)));
 	}
@@ -282,26 +285,31 @@ error:
  * state dump files and the name of the oldest file created.
  */
 mDNSlocal mDNSs32
-find_oldest_state_dump(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 buffer_len,
-	char *oldest_file_name)
+find_oldest_state_dump(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 full_file_name_buffer_size,
+	char *oldest_file_name, mDNSu32 oldest_file_name_buffer_size)
 {
 	int ret;
+	int bytes_will_be_written;
+	DIR *dir_p = NULL;
+	mDNSu8 dump_file_count = 0;
 
-	full_file_name[0] = '\0';
-	full_file_name[buffer_len - 1]= '\0';
-	snprintf(full_file_name, buffer_len - 1, "%s/%s", dump_dir, file_name);
+	bytes_will_be_written = snprintf(full_file_name, full_file_name_buffer_size, "%s/%s", dump_dir, file_name);
+	require_action_quiet(bytes_will_be_written > 0 && (mDNSu32) bytes_will_be_written < full_file_name_buffer_size, exit,
+		ret = -1;
+		LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_ERROR, "snprintf truncates the final string - "
+			"full name buffer length: %u, directory name length: %zu, file name length: %zu",
+			full_file_name_buffer_size, strlen(dump_dir), strlen(file_name))
+	);
 
-	DIR *dir_p = opendir(dump_dir);
-	if (dir_p == mDNSNULL) {
-		LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_DEFAULT,
-			"State Dump: directory " PUB_S " cannot be opened, reason: " PUB_S, dump_dir, strerror(errno));
-		return -1;
-	}
+	dir_p = opendir(dump_dir);
+	require_action_quiet(dir_p != NULL, exit, ret = -1;
+		LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_ERROR, "State Dump: directory " PUB_S " cannot be opened, reason: "
+			PUB_S, dump_dir, strerror(errno))
+	);
 
 	// scan every entry under directory, if starts with <mDNSResponder state dump file name>, check its create time.
 	struct dirent	*dir_entry_p = mDNSNULL;
 	size_t			file_name_len = strnlen(file_name, MAXPATHLEN);
-	mDNSu8			dump_file_count = 0;
 	struct timespec oldest_time = {LONG_MAX, LONG_MAX};
 
 	while ((dir_entry_p = readdir(dir_p)) != mDNSNULL) {
@@ -310,28 +318,43 @@ find_oldest_state_dump(const char *dump_dir, const char *file_name, char *full_f
 
 		if (strncmp(dir_entry_p->d_name, file_name, file_name_len) == 0) {
 			struct stat file_state;
-			snprintf(full_file_name, buffer_len - 1, "%s/%s", dump_dir, dir_entry_p->d_name);
+			bytes_will_be_written = snprintf(full_file_name, full_file_name_buffer_size, "%s/%s", dump_dir,
+				dir_entry_p->d_name);
+			require_action_quiet(bytes_will_be_written > 0 && (mDNSu32) bytes_will_be_written < full_file_name_buffer_size, exit,
+				ret = -1;
+				LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_ERROR, "snprintf truncates the final string - "
+					"full name buffer length: %u, directory name length: %zu, file name length: %zu",
+					full_file_name_buffer_size, strlen(dump_dir), strlen(dir_entry_p->d_name))
+			);
 
 			// use stat to get creation time
 			ret = stat(full_file_name, &file_state);
-			if (ret != 0) {
-				LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_DEFAULT,
-					"State Dump: error when reading file properties, reason: " PUB_S, strerror(errno));
-				return -1;
-			}
+			require_action_quiet(ret == 0, exit, ret = -1;
+				LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_ERROR, "State Dump: error when reading file properties - "
+					"reason: " PUB_S, strerror(errno)));
 			// if the file is older than the current record
 			if (oldest_time.tv_sec > file_state.st_birthtimespec.tv_sec
 				|| (oldest_time.tv_sec == file_state.st_birthtimespec.tv_sec
 					&& oldest_time.tv_sec > file_state.st_birthtimespec.tv_sec)) {
 				oldest_time = file_state.st_birthtimespec;
-				strncpy(oldest_file_name, dir_entry_p->d_name, MIN(PATH_MAX - 1, dir_entry_p->d_namlen + 1));
+				if (dir_entry_p->d_namlen >= oldest_file_name_buffer_size) {
+					LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_ERROR,
+						"State Dump: filename is too long to be put into the buffer, ignoring the current file"
+						" - file name to be copied: " PRI_S ", length: %u, buffer length: %u",
+						dir_entry_p->d_name, dir_entry_p->d_namlen, oldest_file_name_buffer_size);
+					continue;
+				}
+				strlcpy(oldest_file_name, dir_entry_p->d_name, oldest_file_name_buffer_size);
 			}
 
 			dump_file_count++;
 		}
 	}
-	closedir(dir_p);
 
+exit:
+	if (dir_p != NULL) {
+		closedir(dir_p);
+	}
 	return dump_file_count;
 }
 
@@ -339,20 +362,32 @@ mDNSlocal mDNSs8
 remove_state_dump_if_too_many(const char *dump_dir, const char *oldest_file_name, mDNSs32 dump_file_count,
 	mDNSs32 max_allowed)
 {
+	int ret;
 	char path_file_to_remove[PATH_MAX];
 	path_file_to_remove[PATH_MAX - 1] = '\0';
-	// If the number of state dump files has reached the maximum value, we delete the oldest one.
-	if (dump_file_count == max_allowed) {
-		// construct the full name
-		snprintf(path_file_to_remove, PATH_MAX - 1, "%s/%s", dump_dir, oldest_file_name);
-		if (remove(path_file_to_remove) != 0) {
-			LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_DEFAULT,
-				"State Dump: file " PUB_S " cannot be deleted, reason: " PUB_S, path_file_to_remove, strerror(errno));
-			return -1;
-		}
+
+	if (dump_file_count < max_allowed) {
+		ret = 0;
+		goto exit;
 	}
 
-	return 0;
+	int bytes_will_be_written = snprintf(path_file_to_remove, sizeof(path_file_to_remove), "%s/%s", dump_dir,
+		oldest_file_name);
+	require_action_quiet(bytes_will_be_written > 0 && (size_t)bytes_will_be_written < sizeof(path_file_to_remove), exit,
+		ret = -1;
+		 LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_ERROR, "State Dump: snprintf truncates the final string - "
+			"buffer length: %zu, directory name length: %zu, old file name length: %zu",
+			sizeof(path_file_to_remove), strlen(dump_dir), strlen(oldest_file_name))
+	);
+
+	ret = remove(path_file_to_remove);
+	require_action_quiet(ret == 0, exit, ret = -1;
+		LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_ERROR, "State Dump: file " PUB_S " cannot be deleted, reason: "
+			PUB_S, path_file_to_remove, strerror(errno)));
+
+	ret = 0;
+exit:
+	return ret;
 }
 
 /*
@@ -360,12 +395,13 @@ remove_state_dump_if_too_many(const char *dump_dir, const char *oldest_file_name
  * function must call fclose() to release the FILE pointer.
  */
 mDNSlocal int
-create_new_state_dump_file(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 buffer_len)
+create_new_state_dump_file(const char *dump_dir, const char *file_name, char *full_file_name, mDNSu32 buffer_size)
 {
 	struct timeval		now;
 	struct tm			local_time;
 	char				date_time_str[32];
 	char				time_zone_str[32];
+	int 				fd;
 
 	gettimeofday(&now, NULL);
 	localtime_r(&now.tv_sec, &local_time);
@@ -375,16 +411,19 @@ create_new_state_dump_file(const char *dump_dir, const char *file_name, char *fu
 	// +0800
 	strftime(time_zone_str, sizeof(time_zone_str), "%z", &local_time);
 	// /private/var/log/mDNSResponder/mDNSResponder_state_dump_2008-08-08_20-00-00-000000+0800.txt
-	snprintf(full_file_name, buffer_len, "%s/%s_%s-%06lu%s." STATE_DUMP_PLAIN_SUFFIX,
+	int bytes_will_be_written = snprintf(full_file_name, buffer_size, "%s/%s_%s-%06lu%s." STATE_DUMP_PLAIN_SUFFIX,
 		dump_dir, file_name, date_time_str, (unsigned long)now.tv_usec, time_zone_str);
+	require_action_quiet(bytes_will_be_written > 0 && (mDNSu32)bytes_will_be_written < buffer_size, exit, fd = -1;
+		LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_ERROR, "State Dump: snprintf truncates the final string - "
+			"minimal buffer size: %d, actual buffer size: %u", bytes_will_be_written, buffer_size));
 
-	int fd = open(full_file_name, O_WRONLY | O_CREAT, 0644); // 0644 means * (owning) User: read & write * Group: read * Other: read
-	if (fd < 0) {
-		LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-			"State Dump: file " PUB_S " cannot be opened, reason: " PUB_S, full_file_name, strerror(errno));
-		return -1;
-	}
+	fd = open(full_file_name, O_WRONLY | O_CREAT, 0644); // 0644 means * (owning) User: read & write * Group: read * Other: read
+	require_action_quiet(fd >= 0, exit, fd = -1;
+		LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "State Dump: file " PUB_S " cannot be opened, reason: "
+			PUB_S, full_file_name, strerror(errno))
+	);
 
+exit:
 	return fd;
 }
 
@@ -393,7 +432,7 @@ create_new_state_dump_file(const char *dump_dir, const char *file_name, char *fu
  * newly created compressed file if compression succeeds.
  */
 mDNSlocal mDNSs8
-compress_state_dump_and_delete(char *input_file, mDNSu32 buffer_len)
+compress_state_dump_and_delete(char *input_file, mDNSu32 buffer_size)
 {
 	struct archive			*a				= mDNSNULL;
 	mDNSBool				archive_opened	= mDNSfalse;
@@ -404,7 +443,7 @@ compress_state_dump_and_delete(char *input_file, mDNSu32 buffer_len)
 	void					*mapped_pointer = MAP_FAILED;
 	int						ret;
 	int						error;
-	mDNSu32					file_size;
+	mDNSu32					file_size		= 0;
 
 	output_file[PATH_MAX - 1] = '\0';
 
@@ -416,9 +455,16 @@ compress_state_dump_and_delete(char *input_file, mDNSu32 buffer_len)
 
 	// remove the .txt suffix, and append .tar.bz2 suffix
 	size_t plain_file_name_len = strlen(input_file); // input_file is guaranteed to be '\0'-terminated
-	strncpy(output_file, input_file, plain_file_name_len - sizeof(STATE_DUMP_PLAIN_SUFFIX));
-	output_file[plain_file_name_len - sizeof(STATE_DUMP_PLAIN_SUFFIX)] = '\0';
-	strncat(output_file, "." STATE_DUMP_COMPRESSED_SUFFIX, 1 + sizeof(STATE_DUMP_COMPRESSED_SUFFIX));
+	// xxx.txt -> xxx.tar.bz2
+	require_action_quiet(sizeof(output_file) > plain_file_name_len - strlen(STATE_DUMP_PLAIN_SUFFIX) + strlen(STATE_DUMP_COMPRESSED_SUFFIX),
+		exit, error = -1;
+		LogRedact(MDNS_LOG_CATEGORY_XPC, MDNS_LOG_DEBUG, "buffer is not large enough to hold the file name "
+			"- buffer length: %zu, required length: %zu", sizeof(output_file),
+			plain_file_name_len - strlen(STATE_DUMP_PLAIN_SUFFIX) + strlen(STATE_DUMP_COMPRESSED_SUFFIX))
+	);
+	// "xxx." + "tar.bz2"
+	snprintf(output_file, sizeof(output_file), "%.*s%s", (int)(strlen(input_file) - strlen(STATE_DUMP_PLAIN_SUFFIX)),
+		input_file, STATE_DUMP_COMPRESSED_SUFFIX);
 
 	// open/create the archive for the given path name
 	ret = archive_write_open_filename(a, output_file);
@@ -487,9 +533,10 @@ exit:
 		archive_write_free(a);				// undo archive_write_new
 	}
 	remove(input_file);
-	if (error == 0) {
-		strncpy(input_file, output_file, buffer_len);
+	if (error == 0 && strlen(output_file) < buffer_size) {
+		strlcpy(input_file, output_file, buffer_size);
 	} else {
+		error = -1;
 		input_file[0] = '\0';
 	}
 	return error;

@@ -34,6 +34,8 @@
 #endif
 
 
+#include "mdns_strict.h"
+
 #if (defined(_MSC_VER))
 // Disable "assignment within conditional expression".
 // Other compilers understand the convention that if you place the assignment expression within an extra pair
@@ -55,12 +57,14 @@ mDNSBool StrictUnicastOrdering = mDNSfalse;
 
 extern mDNS mDNSStorage;
 
+#if !MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 // We keep track of the number of unicast DNS servers and log a message when we exceed 64.
 // Currently the unicast queries maintain a 128 bit map to track the valid DNS servers for that
 // question. Bit position is the index into the DNS server list. This is done so to try all
 // the servers exactly once before giving up. If we could allocate memory in the core, then
 // arbitrary limitation of 128 DNSServers can be removed.
 #define MAX_UNICAST_DNS_SERVERS 128
+#endif
 
 #define SetNextuDNSEvent(m, rr) { \
         if ((m)->NextuDNSEvent - ((rr)->LastAPTime + (rr)->ThisAPInterval) >= 0)                                                                              \
@@ -70,9 +74,7 @@ extern mDNS mDNSStorage;
 #ifndef UNICAST_DISABLED
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - General Utility Functions
-#endif
+// MARK: - General Utility Functions
 
 // set retry timestamp for record with exponential backoff
 mDNSlocal void SetRecordRetry(mDNS *const m, AuthRecord *rr, mDNSu32 random)
@@ -114,9 +116,7 @@ mDNSlocal void SetRecordRetry(mDNS *const m, AuthRecord *rr, mDNSu32 random)
 }
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - Name Server List Management
-#endif
+// MARK: - Name Server List Management
 
 #if !MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *domain, const mDNSInterfaceID interface,
@@ -367,9 +367,7 @@ end:
 #endif // !MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - authorization management
-#endif
+// MARK: - authorization management
 
 mDNSlocal DomainAuthInfo *GetAuthInfoForName_direct(mDNS *m, const domainname *const name)
 {
@@ -403,7 +401,8 @@ mDNSexport DomainAuthInfo *GetAuthInfoForName_internal(mDNS *m, const domainname
         {
             DNSQuestion *q;
             DomainAuthInfo *info = *p;
-            LogInfo("GetAuthInfoForName_internal deleting expired key %##s %##s", info->domain.c, info->keyname.c);
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "GetAuthInfoForName_internal deleting expired key " PRI_DM_NAME " " PRI_DM_NAME,
+                DM_NAME_PARAM(&info->domain), DM_NAME_PARAM(&info->keyname));
             *p = info->next;    // Cut DomainAuthInfo from list *before* scanning our question list updating AuthInfo pointers
             for (q = m->Questions; q; q=q->next)
                 if (q->AuthInfo == info)
@@ -489,10 +488,7 @@ mDNSexport mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
 }
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - NAT Traversal
-#endif
+// MARK: - NAT Traversal
 
 // Keep track of when to request/refresh the external address using NAT-PMP or UPnP/IGD,
 // and do so when necessary
@@ -568,7 +564,7 @@ mDNSlocal mStatus uDNS_SendNATMsg(mDNS *m, NATTraversalInfo *info, mDNSBool useP
 
     if (!info)
     {
-        LogMsg("uDNS_SendNATMsg called unexpectedly with NULL info");
+        LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "uDNS_SendNATMsg called unexpectedly with NULL info");
         return mStatus_BadParamErr;
     }
 
@@ -673,7 +669,9 @@ mDNSlocal mStatus uDNS_SendNATMsg(mDNS *m, NATTraversalInfo *info, mDNSBool useP
                 {
                     mStatus lnterr = LNT_MapPort(m, info);
                     if (lnterr)
-                        LogMsg("uDNS_SendNATMsg: LNT_MapPort returned error %d", lnterr);
+                    {
+                        LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "uDNS_SendNATMsg: LNT_MapPort returned error %d", lnterr);
+                    }
 
                     err = err ? err : lnterr; // PCP error takes precedence
                 }
@@ -917,12 +915,12 @@ mDNSexport mStatus mDNS_StopNATOperation_internal(mDNS *m, NATTraversalInfo *tra
     if (*ptr) *ptr = (*ptr)->next;      // If we found it, cut this NATTraversalInfo struct from our list
     else
     {
-        LogMsg("mDNS_StopNATOperation_internal: NATTraversalInfo %p not found in list", traversal);
+        LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "mDNS_StopNATOperation_internal: NATTraversalInfo %p not found in list", traversal);
         return(mStatus_BadReferenceErr);
     }
 
-    LogInfo("mDNS_StopNATOperation_internal %p %d %d %d %d", traversal,
-            traversal->Protocol, mDNSVal16(traversal->IntPort), mDNSVal16(traversal->RequestedPort), traversal->NATLease);
+    LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_INFO, "mDNS_StopNATOperation_internal %p %d %d %d %d", traversal,
+        traversal->Protocol, mDNSVal16(traversal->IntPort), mDNSVal16(traversal->RequestedPort), traversal->NATLease);
 
     if (m->CurrentNATTraversal == traversal)
         m->CurrentNATTraversal = m->CurrentNATTraversal->next;
@@ -935,10 +933,10 @@ mDNSexport mStatus mDNS_StopNATOperation_internal(mDNS *m, NATTraversalInfo *tra
              (!p->Protocol && traversal->Protocol == NATOp_MapTCP && mDNSSameIPPort(traversal->IntPort, DiscardPort))) :
             (!p->Protocol || (p->Protocol == NATOp_MapTCP && mDNSSameIPPort(p->IntPort, DiscardPort))))
         {
-            LogInfo("Warning: Removed port mapping request %p Prot %d Int %d TTL %d "
-                    "duplicates existing port mapping request %p Prot %d Int %d TTL %d",
-                    traversal, traversal->Protocol, mDNSVal16(traversal->IntPort), traversal->NATLease,
-                            p,         p->Protocol, mDNSVal16(        p->IntPort),         p->NATLease);
+            LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_INFO, "Warning: Removed port mapping request %p Prot %d Int %d TTL %d "
+                "duplicates existing port mapping request %p Prot %d Int %d TTL %d",
+                traversal, traversal->Protocol, mDNSVal16(traversal->IntPort), traversal->NATLease,
+                p, p->Protocol, mDNSVal16(p->IntPort), p->NATLease);
             unmap = mDNSfalse;
         }
     }
@@ -949,7 +947,10 @@ mDNSexport mStatus mDNS_StopNATOperation_internal(mDNS *m, NATTraversalInfo *tra
     #ifdef _LEGACY_NAT_TRAVERSAL_
     {
         mStatus err = LNT_UnmapPort(m, traversal);
-        if (err) LogMsg("Legacy NAT Traversal - unmap request failed with error %d", err);
+        if (err)
+        {
+            LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "Legacy NAT Traversal - unmap request failed with error %d", err);
+        }
     }
     #endif // _LEGACY_NAT_TRAVERSAL_
 
@@ -999,10 +1000,7 @@ mDNSexport mStatus mDNS_StopNATOperation(mDNS *const m, NATTraversalInfo *traver
 }
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - Long-Lived Queries
-#endif
+// MARK: - Long-Lived Queries
 
 // Lock must be held -- otherwise m->timenow is undefined
 mDNSlocal void StartLLQPolling(mDNS *const m, DNSQuestion *q)
@@ -1024,7 +1022,11 @@ mDNSlocal mDNSu8 *putLLQ(DNSMessage *const msg, mDNSu8 *ptr, const DNSQuestion *
 
     //!!!KRS when we implement multiple llqs per message, we'll need to memmove anything past the question section
     ptr = putQuestion(msg, ptr, msg->data + AbsoluteMaxDNSMessageData, &question->qname, question->qtype, question->qclass);
-    if (!ptr) { LogMsg("ERROR: putLLQ - putQuestion"); return mDNSNULL; }
+    if (!ptr)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "ERROR: putLLQ - putQuestion");
+        return mDNSNULL;
+    }
 
     // locate OptRR if it exists, set pointer to end
     // !!!KRS implement me
@@ -1039,7 +1041,11 @@ mDNSlocal mDNSu8 *putLLQ(DNSMessage *const msg, mDNSu8 *ptr, const DNSQuestion *
     optRD->opt = kDNSOpt_LLQ;
     optRD->u.llq = *data;
     ptr = PutResourceRecordTTLJumbo(msg, ptr, &msg->h.numAdditionals, opt, 0);
-    if (!ptr) { LogMsg("ERROR: putLLQ - PutResourceRecordTTLJumbo"); return mDNSNULL; }
+    if (!ptr)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "ERROR: putLLQ - PutResourceRecordTTLJumbo");
+        return mDNSNULL;
+    }
 
     return ptr;
 }
@@ -1950,9 +1956,7 @@ mDNSexport DomainAuthInfo *GetAuthInfoForQuestion(mDNS *m, const DNSQuestion *co
 }
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - host name and interface management
-#endif
+// MARK: - host name and interface management
 
 mDNSlocal void SendRecordRegistration(mDNS *const m, AuthRecord *rr);
 mDNSlocal void SendRecordDeregistration(mDNS *m, AuthRecord *rr);
@@ -2320,8 +2324,10 @@ mDNSlocal void UpdateOneSRVRecord(mDNS *m, AuthRecord *rr)
         }
         return;
     case regState_Unregistered:
-    default: LogMsg("UpdateOneSRVRecord: Unknown state %d for %##s", rr->state, rr->resrec.name->c);
+    case regState_Zero:
+        break;
     }
+    LogMsg("UpdateOneSRVRecord: Unknown state %d for %##s", rr->state, rr->resrec.name->c);
 }
 
 mDNSexport void UpdateAllSRVRecords(mDNS *m)
@@ -2414,7 +2420,7 @@ mDNSlocal void AdvertiseHostname(mDNS *m, HostnameInfo *h)
 
 mDNSlocal void HostnameCallback(mDNS *const m, AuthRecord *const rr, mStatus result)
 {
-    HostnameInfo *hi = (HostnameInfo *)rr->RecordContext;
+    HostnameInfo *hi = rr->RecordContext;
 
     if (result == mStatus_MemFree)
     {
@@ -2456,7 +2462,7 @@ mDNSlocal void HostnameCallback(mDNS *const m, AuthRecord *const rr, mStatus res
             rr->RecordContext = (void *)hi->StatusContext;
             if (hi->StatusCallback)
                 hi->StatusCallback(m, rr, result); // client may NOT make API calls here
-            rr->RecordContext = (void *)hi;
+            rr->RecordContext = hi;
         }
         return;
     }
@@ -2476,7 +2482,7 @@ mDNSlocal void HostnameCallback(mDNS *const m, AuthRecord *const rr, mStatus res
     rr->RecordContext = (void *)hi->StatusContext;
     if (hi->StatusCallback)
         hi->StatusCallback(m, rr, result); // client may NOT make API calls here
-    rr->RecordContext = (void *)hi;
+    rr->RecordContext = hi;
 }
 
 mDNSlocal void FoundStaticHostname(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
@@ -2585,10 +2591,13 @@ mDNSexport void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn)
 {
     HostnameInfo **ptr = &m->Hostnames;
 
-    LogInfo("mDNS_RemoveDynDNSHostName %##s", fqdn);
+    LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "mDNS_RemoveDynDNSHostName " PRI_DM_NAME, DM_NAME_PARAM(fqdn));
 
     while (*ptr && !SameDomainName(fqdn, &(*ptr)->fqdn)) ptr = &(*ptr)->next;
-    if (!*ptr) LogMsg("mDNS_RemoveDynDNSHostName: no such domainname %##s", fqdn->c);
+    if (!*ptr)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "mDNS_RemoveDynDNSHostName: no such domainname " PRI_DM_NAME, DM_NAME_PARAM(fqdn));
+    }
     else
     {
         HostnameInfo *hi = *ptr;
@@ -2601,12 +2610,12 @@ mDNSexport void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn)
         {
             if (f4)
             {
-                LogInfo("mDNS_RemoveDynDNSHostName removing v4 %##s", fqdn);
+                LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "mDNS_RemoveDynDNSHostName removing v4 " PRI_DM_NAME, DM_NAME_PARAM(fqdn));
                 mDNS_Deregister_internal(m, &hi->arv4, mDNS_Dereg_normal);
             }
             if (f6)
             {
-                LogInfo("mDNS_RemoveDynDNSHostName removing v6 %##s", fqdn);
+                LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "mDNS_RemoveDynDNSHostName removing v6 " PRI_DM_NAME, DM_NAME_PARAM(fqdn));
                 mDNS_Deregister_internal(m, &hi->arv6, mDNS_Dereg_normal);
             }
             // When both deregistrations complete we'll free the memory in the mStatus_MemFree callback
@@ -2714,9 +2723,7 @@ mDNSexport void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr, co
 }
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - Incoming Message Processing
-#endif
+// MARK: - Incoming Message Processing
 
 mDNSlocal mStatus ParseTSIGError(mDNS *const m, const DNSMessage *const msg, const mDNSu8 *const end, const domainname *const displayname)
 {
@@ -3179,7 +3186,7 @@ mDNSlocal AuthRecord *MarkRRForSending(mDNS *const m)
 
 mDNSlocal mDNSBool SendGroupUpdates(mDNS *const m)
 {
-    mDNSOpaque16 msgid;
+    mDNSOpaque16 msgid = zeroID;
     mDNSs32 spaceleft = 0;
     mDNSs32 zoneSize, rrSize;
     mDNSu8 *oldnext; // for debugging
@@ -3877,9 +3884,7 @@ mDNSexport void uDNS_ReceiveMsg(mDNS *const m, DNSMessage *const msg, const mDNS
 }
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - Query Routines
-#endif
+// MARK: - Query Routines
 
 mDNSexport void sendLLQRefresh(mDNS *m, DNSQuestion *q)
 {
@@ -3889,7 +3894,8 @@ mDNSexport void sendLLQRefresh(mDNS *m, DNSQuestion *q)
     if (q->ReqLease)
         if ((q->state == LLQ_Established && q->ntries >= kLLQ_MAX_TRIES) || q->expire - m->timenow < 0)
         {
-            LogMsg("Unable to refresh LLQ %##s (%s) - will retry in %d seconds", q->qname.c, DNSTypeName(q->qtype), LLQ_POLL_INTERVAL / mDNSPlatformOneSecond);
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "Unable to refresh LLQ " PRI_DM_NAME " (" PUB_S ") - will retry in %d seconds",
+                DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), LLQ_POLL_INTERVAL / mDNSPlatformOneSecond);
             StartLLQPolling(m,q);
             return;
         }
@@ -3902,17 +3908,23 @@ mDNSexport void sendLLQRefresh(mDNS *m, DNSQuestion *q)
 
     InitializeDNSMessage(&m->omsg.h, q->TargetQID, uQueryFlags);
     end = putLLQ(&m->omsg, m->omsg.data, q, &llq);
-    if (!end) { LogMsg("sendLLQRefresh: putLLQ failed %##s (%s)", q->qname.c, DNSTypeName(q->qtype)); return; }
+    if (!end)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "sendLLQRefresh: putLLQ failed " PRI_DM_NAME " (" PUB_S ")", DM_NAME_PARAM(&q->qname),
+            DNSTypeName(q->qtype));
+        return;
+    }
 
     {
         mStatus err;
 
-        LogInfo("sendLLQRefresh: using existing UDP session %##s (%s)", q->qname.c, DNSTypeName(q->qtype));
+        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "sendLLQRefresh: using existing UDP session " PRI_DM_NAME " (" PUB_S ")", DM_NAME_PARAM(&q->qname),
+            DNSTypeName(q->qtype));
 
         err = mDNSSendDNSMessage(m, &m->omsg, end, mDNSInterface_Any, q->tcp ? q->tcp->sock : mDNSNULL, q->LocalSocket, &q->servAddr, q->servPort, mDNSNULL, mDNSfalse);
         if (err)
         {
-            LogMsg("sendLLQRefresh: mDNSSendDNSMessage%s failed: %d", q->tcp ? " (TCP)" : "", err);
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "sendLLQRefresh: mDNSSendDNSMessage" PUB_S " failed: %d", q->tcp ? " (TCP)" : "", err);
             if (q->tcp) { DisposeTCPConn(q->tcp); q->tcp = mDNSNULL; }
         }
     }
@@ -4005,9 +4017,7 @@ mDNSexport void DNSPushNotificationGotZoneData(mDNS *const m, mStatus err, const
 #endif
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - Dynamic Updates
-#endif
+// MARK: - Dynamic Updates
 
 // Called in normal callback context (i.e. mDNS_busy and mDNS_reentrancy are both 1)
 mDNSexport void RecordRegistrationGotZoneData(mDNS *const m, mStatus err, const ZoneData *zoneData)
@@ -4220,7 +4230,7 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
 {
     DomainAuthInfo *info;
 
-    LogInfo("uDNS_DeregisterRecord: Resource Record %s, state %d", ARDisplayString(m, rr), rr->state);
+    LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: Resource Record " PRI_S ", state %d", ARDisplayString(m, rr), rr->state);
 
     switch (rr->state)
     {
@@ -4239,8 +4249,8 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
     case regState_NoTarget:
     case regState_Unregistered:
     case regState_Zero:
-    default:
-        LogInfo("uDNS_DeregisterRecord: State %d for %##s type %s", rr->state, rr->resrec.name->c, DNSTypeName(rr->resrec.rrtype));
+        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: State %d for " PRI_DM_NAME " type " PUB_S,
+            rr->state, DM_NAME_PARAM(rr->resrec.name), DNSTypeName(rr->resrec.rrtype));
         // This function may be called during sleep when there are no sleep proxy servers
         if (rr->resrec.RecordType == kDNSRecordTypeDeregistering) CompleteDeregistration(m, rr);
         return mStatus_NoError;
@@ -4264,21 +4274,21 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
     {
         if (rr->InFlightRData != rr->resrec.rdata)
         {
-            LogInfo("uDNS_DeregisterRecord: Freeing InFlightRData for %s", ARDisplayString(m, rr));
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: Freeing InFlightRData for " PRI_S, ARDisplayString(m, rr));
             rr->UpdateCallback(m, rr, rr->InFlightRData, rr->InFlightRDLen);
             rr->InFlightRData = mDNSNULL;
         }
         else
-            LogInfo("uDNS_DeregisterRecord: InFlightRData same as rdata for %s", ARDisplayString(m, rr));
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: InFlightRData same as rdata for " PRI_S, ARDisplayString(m, rr));
     }
 
     if (rr->QueuedRData && rr->UpdateCallback)
     {
         if (rr->QueuedRData == rr->resrec.rdata)
-            LogMsg("uDNS_DeregisterRecord: ERROR!! QueuedRData same as rdata for %s", ARDisplayString(m, rr));
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: ERROR!! QueuedRData same as rdata for " PRI_S, ARDisplayString(m, rr));
         else
         {
-            LogInfo("uDNS_DeregisterRecord: Freeing QueuedRData for %s", ARDisplayString(m, rr));
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: Freeing QueuedRData for " PRI_S, ARDisplayString(m, rr));
             rr->UpdateCallback(m, rr, rr->QueuedRData, rr->QueuedRDLen);
             rr->QueuedRData = mDNSNULL;
         }
@@ -4305,15 +4315,22 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
         {
             if (AuthRecord_uDNS(rr) && mDNSSameOpaque16(anchorRR->updateid, rr->updateid) && anchorRR->tcp)
             {
-                LogInfo("uDNS_DeregisterRecord: Found Anchor RR %s terminated", ARDisplayString(m, anchorRR));
+                LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: Found Anchor RR " PRI_S " terminated", ARDisplayString(m, anchorRR));
                 if (found)
-                    LogMsg("uDNS_DeregisterRecord: ERROR: Another anchorRR %s found", ARDisplayString(m, anchorRR));
+                {
+                    LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: ERROR: Another anchorRR " PRI_S " found",
+                        ARDisplayString(m, anchorRR));
+                }
                 DisposeTCPConn(anchorRR->tcp);
                 anchorRR->tcp = mDNSNULL;
                 found = mDNStrue;
             }
         }
-        if (!found) LogInfo("uDNSDeregisterRecord: Cannot find the anchor Resource Record for %s, not an error", ARDisplayString(m, rr));
+        if (!found)
+        {
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNSDeregisterRecord: Cannot find the anchor Resource Record for " PRI_S ", not an error",
+                ARDisplayString(m, rr));
+        }
     }
 
     // Retry logic for deregistration should be no different from sending registration the first time.
@@ -4383,12 +4400,12 @@ mDNSexport mStatus uDNS_UpdateRecord(mDNS *m, AuthRecord *rr)
         SetNextuDNSEvent(m, rr);
         return mStatus_NoError;
 
+    case regState_Zero:
     case regState_NATError:
         LogMsg("ERROR: uDNS_UpdateRecord called for record %##s with bad state regState_NATError", rr->resrec.name->c);
         return mStatus_UnknownErr;      // states for service records only
-
-    default: LogMsg("uDNS_UpdateRecord: Unknown state %d for %##s", rr->state, rr->resrec.name->c);
     }
+    LogMsg("uDNS_UpdateRecord: Unknown state %d for %##s", rr->state, rr->resrec.name->c);
 
 unreg_error:
     LogMsg("uDNS_UpdateRecord: Requested update of record %##s type %d, in erroneous state %d",
@@ -4397,9 +4414,7 @@ unreg_error:
 }
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - Periodic Execution Routines
-#endif
+// MARK: - Periodic Execution Routines
 
 mDNSlocal void uDNS_HandleLLQState(mDNS *const m, DNSQuestion *q)
 {
@@ -4464,6 +4479,7 @@ mDNSlocal void uDNS_HandleLLQState(mDNS *const m, DNSQuestion *q)
         case LLQ_SecondaryRequest: sendChallengeResponse(m, q, mDNSNULL); break;
         case LLQ_Established:      sendLLQRefresh(m, q); break;
         case LLQ_Poll:             break;       // Do nothing (handled below)
+        case LLQ_Invalid:          break;
     }
     LogMsg("<-uDNS_HandleLLQState: %##s %d %d", &q->qname, q->state);
 }
@@ -4983,9 +4999,7 @@ mDNSexport void uDNS_Tasks(mDNS *const m)
 }
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - Startup, Shutdown, and Sleep
-#endif
+// MARK: - Startup, Shutdown, and Sleep
 
 mDNSexport void SleepRecordRegistrations(mDNS *m)
 {
@@ -5580,9 +5594,7 @@ struct CompileTimeAssertionChecks_uDNS
     char sizecheck_SearchListElem[(sizeof(SearchListElem) <=  6381) ? 1 : -1];
 };
 
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - DNS Push Notification functions
-#endif
+// MARK: - DNS Push Notification functions
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
 mDNSlocal void DNSPushProcessResponse(mDNS *const m, const DNSMessage *const msg,
@@ -6237,9 +6249,7 @@ mDNSexport void UnSubscribeToDNSPushNotificationServer(mDNS *m, DNSQuestion *q)
 }
 #endif // MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
 
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#endif
+// MARK: -
 #else // !UNICAST_DISABLED
 
 mDNSexport const domainname *GetServiceTarget(mDNS *m, AuthRecord *const rr)

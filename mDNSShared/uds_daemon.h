@@ -22,16 +22,13 @@
 #include "dnssd_ipc.h"
 #include "ClientRequests.h"
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
-#include "mdns_private.h"
+#include "mdns_trust.h"
 #endif
 
 /* Client request: */
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - Types and Data Structures
-#endif
+// MARK: - Types and Data Structures
 
 typedef enum
 {
@@ -243,7 +240,7 @@ extern int CountPeerRegistrations(ServiceRecordSet *const srs);
 extern const char mDNSResponderVersionString_SCCS[];
 #define mDNSResponderVersionString (mDNSResponderVersionString_SCCS+5)
 
-#if DEBUG
+#if defined(DEBUG) && DEBUG
 extern void SetDebugBoundPath(void);
 extern int IsDebugSocketInUse(void);
 #endif

@@ -70,7 +70,7 @@
 #endif
 
 // Embed the client stub code here, so we can access private functions like ConnectToServer, create_hdr, deliver_request
-#define XPC_AUTH_CONNECTION   0
+#define MDNS_NO_STRICT     1
 #include "../mDNSShared/dnssd_ipc.c"
 #include "../mDNSShared/dnssd_clientstub.c"
 

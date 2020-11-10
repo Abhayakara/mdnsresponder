@@ -261,7 +261,7 @@ dnssd_xpc_parameters_get_hostname_object(xpc_object_t params);
  *	@param params
  *		Command parameters dictionary.
  *
- *	@para out_valid
+ *	@param out_valid
  *		If non-NULL, set to true if value is present and of correct type, otherwise, set to false.
  *
  *	@result
@@ -768,7 +768,7 @@ dnssd_xpc_result_set_record_class(xpc_object_t result, uint16_t class);
  *		Length of the record data.
  */
 void
-dnssd_xpc_result_set_record_data(xpc_object_t result, const void * _Nullable data_ptr, size_t data_len);
+dnssd_xpc_result_set_record_data(xpc_object_t result, const void *data_ptr, size_t data_len);
 
 /*!
  *	@brief

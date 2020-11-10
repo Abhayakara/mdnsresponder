@@ -19,6 +19,7 @@
 #include <nw/private.h>
 
 #include "dns_sd_internal.h"
+#include "mdns_strict.h"
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 #include "QuerierSupport.h"

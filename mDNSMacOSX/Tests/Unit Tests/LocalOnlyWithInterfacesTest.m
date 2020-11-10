@@ -127,7 +127,7 @@ mDNSlocal mDNSBool _TestCreateEtcHostsEntryWithInterfaceID(const domainname *dom
             rr = rr->next;
         }
     }
-    rr = (AuthRecord *) callocL("etchosts", sizeof(*rr));
+    rr = (AuthRecord *) calloc(1, sizeof(*rr));
     if (rr == NULL) return mDNSfalse;
     mDNS_SetupResourceRecord(rr, NULL, InterfaceID, rrtype, 1, kDNSRecordTypeKnownUnique, AuthRecordLocalOnly, FreeEtcHosts, NULL);
     AssignDomainName(&rr->namestorage, domain);

@@ -17,20 +17,22 @@
 #include "QuerierSupport.h"
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
-#include "DebugServices.h"
 #include "dns_sd_internal.h"
 #include "mDNSMacOSX.h"
-#include "mdns_xpc.h"
 #include "uDNS.h"
+
+#include <CoreUtils/CommonServices.h>
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, METRICS)
 #include "Metrics.h"
 #endif
 
+#include "mdns_strict.h"
 
 #include <libproc.h>
 #include <mach/mach_time.h>
-#include "mdns_helpers.h"
+#include <mdns/ticks.h>
+#include <mdns/xpc.h>
 
 int PQWorkaroundThreshold = 0;
 
@@ -89,9 +91,6 @@ mDNSexport mdns_dns_service_manager_t Querier_GetDNSServiceManager(void)
 
             case mdns_event_invalidated:
                 mdns_release(manager);
-                break;
-
-            default:
                 break;
         }
         KQueueUnlock("DNS Service Manager event handler");
@@ -230,12 +229,12 @@ mDNSlocal mDNSBool _Querier_ShouldLogFullDNSService(const mdns_dns_service_t ser
     }
     else
     {
-        lastFullLogTicks = (uint64_t *)malloc(sizeof(*lastFullLogTicks));
+        lastFullLogTicks = (uint64_t *)mdns_malloc(sizeof(*lastFullLogTicks));
         if (lastFullLogTicks)
         {
             *lastFullLogTicks = mach_continuous_time();
             mdns_dns_service_set_context(service, lastFullLogTicks);
-            mdns_dns_service_set_context_finalizer(service, free);
+            mdns_dns_service_set_context_finalizer(service, mdns_free_context_finalizer);
         }
     }
     return mDNStrue;
@@ -334,7 +333,7 @@ mDNSexport mdns_dns_service_id_t Querier_RegisterCustomDNSServiceWithPListData(c
         if (resolverConfigDict)
         {
             ident = mdns_dns_service_manager_register_custom_service(manager, resolverConfigDict);
-            xpc_release(resolverConfigDict);
+            xpc_forget(&resolverConfigDict);
         }
     }
     return ident;
@@ -390,7 +389,7 @@ mDNSlocal void _Querier_UpdateQuestionMetrics(DNSQuestion *const q)
                     q->metrics.dnsOverTCPState = DNSOverTCP_SuspiciousDefense;
                     break;
 
-                default:
+                case mdns_query_over_tcp_reason_null:
                     break;
             }
         }

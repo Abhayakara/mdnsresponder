@@ -54,16 +54,19 @@
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
-#include "mdns_managed_defaults.h"
+#include <mdns/managed_defaults.h>
 #include "QuerierSupport.h"
+#endif
+#include "mdns_strict.h"
+
+#ifndef USE_SELECT_WITH_KQUEUEFD
+#define USE_SELECT_WITH_KQUEUEFD 0
 #endif
 
 // Used on OSX(10.11.x onwards) for manipulating mDNSResponder program arguments
 
 //*************************************************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - Globals
-#endif
+// MARK: - Globals
 
 static mDNS_PlatformSupport PlatformStorage;
 
@@ -94,11 +97,6 @@ extern mDNSBool EnableAllowExpired;
 mDNSexport void INFOCallback(void);
 mDNSexport void dump_state_to_fd(int fd);
 
-#if ENABLE_BLE_TRIGGERED_BONJOUR
-extern mDNSBool EnableBLEBasedDiscovery;
-extern mDNSBool DefaultToBLETriggered;
-#endif  // ENABLE_BLE_TRIGGERED_BONJOUR
-
 #if MDNSRESPONDER_SUPPORTS(APPLE, PREALLOCATED_CACHE)
 static mDNSBool PreallocateCacheMemory = mDNSfalse;
 #endif
@@ -120,10 +118,7 @@ typedef struct KQSocketEventSource
 static KQSocketEventSource *gEventSources;
 
 //*************************************************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - General Utility Functions
-#endif
+// MARK: - General Utility Functions
 
 #if MDNS_MALLOC_DEBUGGING
 void mDNSPlatformValidateLists()
@@ -264,10 +259,7 @@ mDNSlocal void mDNS_StatusCallback(mDNS *const m, mStatus result)
 
 
 //*************************************************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - Startup, shutdown, and supporting code
-#endif
+// MARK: - Startup, shutdown, and supporting code
 
 mDNSlocal void ExitCallback(int sig)
 {
@@ -401,9 +393,9 @@ mDNSexport void dump_state_to_fd(int fd)
             mdns_dns_service_manager_iterate(manager,
             ^ bool (const mdns_dns_service_t service)
             {
-                char *const desc = mdns_copy_description(service);
+                char *desc = mdns_copy_description(service);
                 LogToFD(fd, "%s", desc ? desc : "<missing description>");
-                free(desc);
+                mdns_free(desc);
                 return false;
             });
         }
@@ -446,7 +438,7 @@ mDNSexport void dump_state_to_fd(int fd)
             if (description)
             {
                 LogToFD(fd, "%s", description);
-                free(description);
+                mdns_free(description);
             }
             else
             {
@@ -499,8 +491,8 @@ mDNSexport void dump_state_to_fd(int fd)
 
 mDNSexport void INFOCallback(void)
 {
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_WARNING,
-        "Sending SIGINFO to mDNSResponder daemon is deprecated. To trigger state dump, please use 'dns-sd -O', enter 'dns-sd -h' for more information");
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Sending SIGINFO to mDNSResponder daemon is deprecated. To trigger state dump, please use 'dns-sd -O', "
+        "enter 'dns-sd -h' for more information");
 }
 
 // Writes the state out to the dynamic store and also affects the ASL filter level
@@ -526,7 +518,7 @@ mDNSexport void UpdateDebugState()
     if (numZero == NULL)
     {
         LogMsg("UpdateDebugState: Could not create CFNumber zero");
-        CFRelease(numOne);
+        MDNS_DISPOSE_CF_OBJECT(numOne);
         return;
     }
 
@@ -550,10 +542,10 @@ mDNSexport void UpdateDebugState()
     else 
         CFDictionarySetValue(dict, CFSTR("McastTracing"), numZero);
 
-    CFRelease(numOne);
-    CFRelease(numZero);
+    MDNS_DISPOSE_CF_OBJECT(numOne);
+    MDNS_DISPOSE_CF_OBJECT(numZero);
     mDNSDynamicStoreSetConfig(kmDNSDebugState, mDNSNULL, dict);
-    CFRelease(dict);
+    MDNS_DISPOSE_CF_OBJECT(dict);
 
 }
 
@@ -576,7 +568,7 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
         mDNSu32 slot;
         CacheGroup *cg;
         CacheRecord *rr;
-        LogMsg("SIGHUP: Purge cache");
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "SIGHUP: Purge cache");
         mDNS_Lock(m);
         FORALL_CACHERECORDS(slot, cg, rr)
         {
@@ -591,31 +583,31 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
     case SIGINFO:   INFOCallback(); break;
     case SIGUSR1:
         mDNS_LoggingEnabled = mDNS_LoggingEnabled ? 0 : 1;
-        LogMsg("SIGUSR1: Logging %s", mDNS_LoggingEnabled ? "Enabled" : "Disabled");
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "SIGUSR1: Logging " PUB_S, mDNS_LoggingEnabled ? "Enabled" : "Disabled");
         WatchDogReportingThreshold = mDNS_LoggingEnabled ? 50 : 250;
         UpdateDebugState();
-        LogInfo("USR1 Logging Enabled"); 
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "USR1 Logging Enabled");
         break;
     case SIGUSR2:
         mDNS_PacketLoggingEnabled = mDNS_PacketLoggingEnabled ? 0 : 1;
-        LogMsg("SIGUSR2: Packet Logging %s", mDNS_PacketLoggingEnabled ? "Enabled" : "Disabled");
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "SIGUSR2: Packet Logging " PUB_S, mDNS_PacketLoggingEnabled ? "Enabled" : "Disabled");
         mDNS_McastTracingEnabled = (mDNS_PacketLoggingEnabled && mDNS_McastLoggingEnabled) ? mDNStrue : mDNSfalse;
-        LogInfo("SIGUSR2: Multicast Tracing is %s", mDNS_McastTracingEnabled ? "Enabled" : "Disabled");
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "SIGUSR2: Multicast Tracing is " PUB_S, mDNS_McastTracingEnabled ? "Enabled" : "Disabled");
         UpdateDebugState();
         break;
     case SIGPROF:  mDNS_McastLoggingEnabled = mDNS_McastLoggingEnabled ? mDNSfalse : mDNStrue;
-        LogMsg("SIGPROF: Multicast Logging %s", mDNS_McastLoggingEnabled ? "Enabled" : "Disabled");
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "SIGPROF: Multicast Logging " PUB_S, mDNS_McastLoggingEnabled ? "Enabled" : "Disabled");
         LogMcastStateInfo(mDNSfalse, mDNStrue, mDNStrue);
         mDNS_McastTracingEnabled = (mDNS_PacketLoggingEnabled && mDNS_McastLoggingEnabled) ? mDNStrue : mDNSfalse;
-        LogMsg("SIGPROF: Multicast Tracing is %s", mDNS_McastTracingEnabled ? "Enabled" : "Disabled");
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "SIGPROF: Multicast Tracing is " PUB_S, mDNS_McastTracingEnabled ? "Enabled" : "Disabled");
         UpdateDebugState();
         break;
     case SIGTSTP:  mDNS_LoggingEnabled = mDNS_PacketLoggingEnabled = mDNS_McastLoggingEnabled = mDNS_McastTracingEnabled = mDNSfalse;
-        LogMsg("All mDNSResponder Debug Logging/Tracing Disabled (USR1/USR2/PROF)");
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "All mDNSResponder Debug Logging/Tracing Disabled (USR1/USR2/PROF)");
         UpdateDebugState();
         break;
 
-    default: LogMsg("SignalCallback: Unknown signal %d", msg_header->msgh_id); break;
+    default: LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "SignalCallback: Unknown signal %d", msg_header->msgh_id); break;
     }
     KQueueUnlock("Unix Signal");
 }
@@ -653,7 +645,7 @@ mDNSlocal kern_return_t mDNSDaemonInitialize(void)
     CFRunLoopSourceRef i_rls  = CFMachPortCreateRunLoopSource(NULL, i_port, 0);
     signal_port       = CFMachPortGetPort(i_port);
     CFRunLoopAddSource(CFRunLoopGetMain(), i_rls, kCFRunLoopDefaultMode);
-    CFRelease(i_rls);
+    MDNS_DISPOSE_CF_OBJECT(i_rls);
     
     return(err);
 }
@@ -866,7 +858,7 @@ mDNSlocal mDNSu32 DHCPWakeTime(void)
             return e;
         }
         CFArrayRef dhcpinfo = CFArrayCreate(NULL, (const void **)&pattern, 1, &kCFTypeArrayCallBacks);
-        CFRelease(pattern);
+        MDNS_DISPOSE_CF_OBJECT(pattern);
         if (dhcpinfo)
         {
             SCDynamicStoreRef store = SCDynamicStoreCreate(NULL, CFSTR("DHCP-LEASES"), NULL, NULL);
@@ -876,41 +868,49 @@ mDNSlocal mDNSu32 DHCPWakeTime(void)
                 if (dict)
                 {
                     ic = CFDictionaryGetCount(dict);
-                    const void *vals[ic];
-                    CFDictionaryGetKeysAndValues(dict, NULL, vals);
-
-                    for (j = 0; j < ic; j++)
+                    CFDictionaryRef *vals = NULL;
+                    if (ic > 0)
                     {
-                        const CFDictionaryRef dhcp = (CFDictionaryRef)vals[j];
-                        if (dhcp)
+                        vals = (CFDictionaryRef *)mdns_calloc(ic, sizeof(*vals));
+                    }
+                    if (vals)
+                    {
+                        CFDictionaryGetKeysAndValues(dict, NULL, (const void **)vals);
+
+                        for (j = 0; j < ic; j++)
                         {
-                            const CFDateRef start = DHCPInfoGetLeaseStartTime(dhcp);
-                            const CFDataRef lease = DHCPInfoGetOptionData(dhcp, 51);    // Option 51 = IP Address Lease Time
-                            if (!start || !lease || CFDataGetLength(lease) < 4)
-                                LogMsg("DHCPWakeTime: SCDynamicStoreCopyDHCPInfo index %d failed "
-                                       "CFDateRef start %p CFDataRef lease %p CFDataGetLength(lease) %d",
-                                       j, start, lease, lease ? CFDataGetLength(lease) : 0);
-                            else
+                            const CFDictionaryRef dhcp = vals[j];
+                            if (dhcp)
                             {
-                                const UInt8 *d = CFDataGetBytePtr(lease);
-                                if (!d) LogMsg("DHCPWakeTime: CFDataGetBytePtr %ld failed", (long)j);
+                                const CFDateRef start = DHCPInfoGetLeaseStartTime(dhcp);
+                                const CFDataRef lease = DHCPInfoGetOptionData(dhcp, 51);    // Option 51 = IP Address Lease Time
+                                if (!start || !lease || CFDataGetLength(lease) < 4)
+                                    LogMsg("DHCPWakeTime: SCDynamicStoreCopyDHCPInfo index %d failed "
+                                           "CFDateRef start %p CFDataRef lease %p CFDataGetLength(lease) %d",
+                                           j, start, lease, lease ? CFDataGetLength(lease) : 0);
                                 else
                                 {
-                                    const mDNSu32 elapsed   = now - CFDateGetAbsoluteTime(start);
-                                    const mDNSu32 lifetime  = (mDNSs32) ((mDNSs32)d[0] << 24 | (mDNSs32)d[1] << 16 | (mDNSs32)d[2] << 8 | d[3]);
-                                    const mDNSu32 remaining = lifetime - elapsed;
-                                    const mDNSu32 wake      = remaining > 60 ? remaining - remaining/10 : 54;   // Wake at 90% of the lease time
-                                    LogSPS("DHCP Address Lease Elapsed %6u Lifetime %6u Remaining %6u Wake %6u", elapsed, lifetime, remaining, wake);
-                                    if (e > wake) e = wake;
+                                    const UInt8 *d = CFDataGetBytePtr(lease);
+                                    if (!d) LogMsg("DHCPWakeTime: CFDataGetBytePtr %ld failed", (long)j);
+                                    else
+                                    {
+                                        const mDNSu32 elapsed   = now - CFDateGetAbsoluteTime(start);
+                                        const mDNSu32 lifetime  = (mDNSs32) ((mDNSs32)d[0] << 24 | (mDNSs32)d[1] << 16 | (mDNSs32)d[2] << 8 | d[3]);
+                                        const mDNSu32 remaining = lifetime - elapsed;
+                                        const mDNSu32 wake      = remaining > 60 ? remaining - remaining/10 : 54;   // Wake at 90% of the lease time
+                                        LogSPS("DHCP Address Lease Elapsed %6u Lifetime %6u Remaining %6u Wake %6u", elapsed, lifetime, remaining, wake);
+                                        if (e > wake) e = wake;
+                                    }
                                 }
                             }
                         }
+                        mdns_free(vals);
                     }
-                    CFRelease(dict);
+                    MDNS_DISPOSE_CF_OBJECT(dict);
                 }
-                CFRelease(store);
+                MDNS_DISPOSE_CF_OBJECT(store);
             }
-            CFRelease(dhcpinfo);
+            MDNS_DISPOSE_CF_OBJECT(dhcpinfo);
         }
     }
     return(e);
@@ -993,16 +993,15 @@ mDNSlocal mDNSBool AllowSleepNow(mDNSs32 now)
                     break;
 
                 case mDNSNextWakeReason_Null:
-                default:
                     reasonStr = CFSTR("unspecified");
                     break;
                 }
-                const CFDateRef WakeDate = CFDateCreate(NULL, CFAbsoluteTimeGetCurrent() + interval);
+                CFDateRef WakeDate = CFDateCreate(NULL, CFAbsoluteTimeGetCurrent() + interval);
                 if (!WakeDate) LogMsg("ScheduleNextWake: CFDateCreate failed");
                 else
                 {
                     const mDNSs32 reqs         = kIOPMSystemPowerStateCapabilityNetwork;
-                    const CFNumberRef Requirements = CFNumberCreate(NULL, kCFNumberSInt32Type, &reqs);
+                    CFNumberRef Requirements = CFNumberCreate(NULL, kCFNumberSInt32Type, &reqs);
                     if (Requirements == NULL) LogMsg("ScheduleNextWake: CFNumberCreate failed");
                     else
                     {
@@ -1010,9 +1009,9 @@ mDNSlocal mDNSBool AllowSleepNow(mDNSs32 now)
                         const void *OptionVals[3] = { WakeDate, Requirements, reasonStr };
                         opts = CFDictionaryCreate(NULL, OptionKeys, OptionVals, 3, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
                         if (!opts) LogMsg("ScheduleNextWake: CFDictionaryCreate failed");
-                        CFRelease(Requirements);
+                        MDNS_DISPOSE_CF_OBJECT(Requirements);
                     }
-                    CFRelease(WakeDate);
+                    MDNS_DISPOSE_CF_OBJECT(WakeDate);
                 }
                 LogSPS("AllowSleepNow: Will request lightweight wakeup in %d seconds", interval);
             }
@@ -1063,13 +1062,16 @@ mDNSlocal mDNSBool AllowSleepNow(mDNSs32 now)
         mDNSMacOSXNetworkChanged();
     }
 
-    LogSPS("AllowSleepNow: %s(%lX) %s at %ld (%d ticks remaining)",
 #if TARGET_OS_OSX && defined(kIOPMAcknowledgmentOptionSystemCapabilityRequirements)
+    LogSPS("AllowSleepNow: %s(%lX) %s at %ld (%d ticks remaining)",
            (m->p->IOPMConnection) ? "IOPMConnectionAcknowledgeEventWithOptions" :
-#endif
            (result == kIOReturnSuccess) ? "IOAllowPowerChange" : "IOCancelPowerChange",
            m->p->SleepCookie, ready ? "ready for sleep" : "giving up", now, m->SleepLimit - now);
-
+#else
+    LogSPS("AllowSleepNow: %s(%lX) %s at %ld (%d ticks remaining)",
+           (result == kIOReturnSuccess) ? "IOAllowPowerChange" : "IOCancelPowerChange",
+           m->p->SleepCookie, ready ? "ready for sleep" : "giving up", now, m->SleepLimit - now);
+#endif
     m->SleepLimit = 0;  // Don't clear m->SleepLimit until after we've logged it above
     m->TimeSlept = mDNSPlatformUTC();
 
@@ -1080,7 +1082,7 @@ mDNSlocal mDNSBool AllowSleepNow(mDNSs32 now)
     if (result == kIOReturnSuccess) IOAllowPowerChange (m->p->PowerConnection, m->p->SleepCookie);
     else IOCancelPowerChange(m->p->PowerConnection, m->p->SleepCookie);
 
-    if (opts) CFRelease(opts);
+    MDNS_DISPOSE_CF_OBJECT(opts);
     return(mDNStrue);
 }
 
@@ -1118,8 +1120,7 @@ mDNSlocal void PrepareForIdle(void *m_param)
     mDNSs32 end            = mDNSPlatformRawTime();
     if (end - start >= WatchDogReportingThreshold)
     {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_WARNING,
-            "CustomSourceHandler: WARNING: Idle task took %d ms to complete", end - start);
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "CustomSourceHandler: WARNING: Idle task took %d ms to complete", end - start);
     }
 
     mDNSs32 now = mDNS_TimeNow(m);
@@ -1201,7 +1202,7 @@ mDNSlocal void * KQueueLoop(void *m_param)
     dnssd_server_init();
 #endif
     pthread_mutex_lock(&PlatformStorage.BigMutex);
-    LogInfo("Starting time value 0x%08lX (%ld)", (mDNSu32)mDNSStorage.timenow_last, mDNSStorage.timenow_last);
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "Starting time value 0x%08X (%d)", (mDNSu32)mDNSStorage.timenow_last, mDNSStorage.timenow_last);
 
     // This is the main work loop:
     // (1) First we give mDNSCore a chance to finish off any of its deferred work and calculate the next sleep time
@@ -1231,7 +1232,7 @@ mDNSlocal void * KQueueLoop(void *m_param)
         mDNSs32 end            = mDNSPlatformRawTime();
         if (end - start >= WatchDogReportingThreshold)
         {
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_WARNING, "WARNING: Idle task took %d ms to complete", end - start);
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "WARNING: Idle task took %d ms to complete", end - start);
         }
 
 #if MDNS_MALLOC_DEBUGGING >= 1
@@ -1247,7 +1248,7 @@ mDNSlocal void * KQueueLoop(void *m_param)
                 AuthRecord *rr;
                 for (rr = mDNSStorage.ResourceRecords; rr; rr=rr->next)
                 {
-                    LogInfo("Cannot exit yet; Resource Record still exists: %s", ARDisplayString(m, rr));
+                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "Cannot exit yet; Resource Record still exists: " PRI_S, ARDisplayString(m, rr));
                     if (mDNS_LoggingEnabled) usleep(10000);     // Sleep 10ms so that we don't flood syslog with too many messages
                 }
             }
@@ -1302,7 +1303,10 @@ mDNSlocal void * KQueueLoop(void *m_param)
         timeout.tv_usec = (ticks % mDNSPlatformOneSecond) * multiplier;
         FD_SET(KQueueFD, &readfds);
         if (select(KQueueFD+1, &readfds, NULL, NULL, &timeout) < 0)
-        { LogMsg("select(%d) failed errno %d (%s)", KQueueFD, errno, strerror(errno)); sleep(1); }
+        {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "select(%d) failed errno %d (" PUB_S ")", KQueueFD, errno, strerror(errno));
+            sleep(1);
+        }
 #else
         struct timespec timeout;
         timeout.tv_sec = ticks / mDNSPlatformOneSecond;
@@ -1313,7 +1317,10 @@ mDNSlocal void * KQueueLoop(void *m_param)
         // In fact, what happens if you do this is that it just returns immediately. So, we have
         // to pass nevents set to one, and then we just ignore the event it gives back to us. -- SC
         if (kevent(KQueueFD, NULL, 0, new_events, 1, &timeout) < 0)
-        { LogMsg("kevent(%d) failed errno %d (%s)", KQueueFD, errno, strerror(errno)); sleep(1); }
+        {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "kevent(%d) failed errno %d (" PUB_S ")", KQueueFD, errno, strerror(errno));
+            sleep(1);
+        }
 #endif
 
         pthread_mutex_lock(&PlatformStorage.BigMutex);
@@ -1338,7 +1345,8 @@ mDNSlocal void * KQueueLoop(void *m_param)
             {
                 const int kevent_errno = errno;
                 // Not sure what to do here, our kqueue has failed us - this isn't ideal
-                LogMsg("ERROR: KQueueLoop - kevent failed errno %d (%s)", kevent_errno, strerror(kevent_errno));
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "ERROR: KQueueLoop - kevent failed errno %d (" PUB_S ")", kevent_errno,
+                    strerror(kevent_errno));
                 exit(kevent_errno);
             }
 
@@ -1354,8 +1362,7 @@ mDNSlocal void * KQueueLoop(void *m_param)
                 mDNSs32 etime = mDNSPlatformRawTime();
                 if (etime - stime >= WatchDogReportingThreshold)
                 {
-                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_WARNING, 
-                        "WARNING: " PUB_S " took %d ms to complete", KQtask, etime - stime);
+                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "WARNING: " PUB_S " took %d ms to complete", KQtask, etime - stime);
                 }
             }
         }
@@ -1381,7 +1388,7 @@ extern int sandbox_init(const char *profile, uint64_t flags, char **errorbuf) __
 mDNSlocal void SandboxProcess(void)
 {
     // Invoke sandbox profile /usr/share/sandbox/mDNSResponder.sb
-#if MDNS_NO_SANDBOX
+#if defined(MDNS_NO_SANDBOX) && MDNS_NO_SANDBOX
     LogMsg("Note: Compiled without Apple Sandbox support");
 #else // MDNS_NO_SANDBOX
     if (!sandbox_init)
@@ -1425,6 +1432,8 @@ os_log_t mDNSLogCategory_Default    = NULL;
 os_log_t mDNSLogCategory_mDNS       = NULL;
 os_log_t mDNSLogCategory_uDNS       = NULL;
 os_log_t mDNSLogCategory_SPS        = NULL;
+os_log_t mDNSLogCategory_NAT        = NULL;
+os_log_t mDNSLogCategory_D2D        = NULL;
 os_log_t mDNSLogCategory_XPC        = NULL;
 os_log_t mDNSLogCategory_Analytics  = NULL;
 os_log_t mDNSLogCategory_DNSSEC     = NULL;
@@ -1435,6 +1444,8 @@ mDNSlocal void init_logging(void)
     MDNS_OS_LOG_CATEGORY_INIT(mDNS);
     MDNS_OS_LOG_CATEGORY_INIT(uDNS);
     MDNS_OS_LOG_CATEGORY_INIT(SPS);
+    MDNS_OS_LOG_CATEGORY_INIT(NAT);
+    MDNS_OS_LOG_CATEGORY_INIT(D2D);
     MDNS_OS_LOG_CATEGORY_INIT(XPC);
     MDNS_OS_LOG_CATEGORY_INIT(Analytics);
     MDNS_OS_LOG_CATEGORY_INIT(DNSSEC);
@@ -1510,8 +1521,7 @@ mDNSexport int main(int argc, char **argv)
     {
         PQWorkaroundThreshold = mdns_managed_defaults_get_int_clamped(managedDefaults,
             kPreferencesKey_PQWorkaroundThreshold, PQWorkaroundThreshold, NULL);
-        CFRelease(managedDefaults);
-        managedDefaults = NULL;
+        MDNS_DISPOSE_CF_OBJECT(managedDefaults);
     }
 #endif
 
@@ -1567,7 +1577,7 @@ mDNSexport int main(int argc, char **argv)
     // Socket pair returned us two identical sockets connected to each other
     // We will use the first socket to send the second socket. The second socket
     // will be added to the kqueue so it will wake when data is sent.
-    static const KQueueEntry wakeKQEntry = { KQWokenFlushBytes, NULL, "kqueue wakeup after CFRunLoop event" };
+    static KQueueEntry wakeKQEntry = { KQWokenFlushBytes, NULL, "kqueue wakeup after CFRunLoop event" };
 
     PlatformStorage.WakeKQueueLoopFD = fdpair[0];
     KQueueSet(fdpair[1], EV_ADD, EVFILT_READ, &wakeKQEntry);
@@ -1646,7 +1656,11 @@ mDNSexport mStatus udsSupportAddFDToEventLoop(int fd, udsEventCallback callback,
     KQSocketEventSource **p = &gEventSources;
     (void) platform_data;
     while (*p && (*p)->fd != fd) p = &(*p)->next;
-    if (*p) { LogMsg("udsSupportAddFDToEventLoop: ERROR fd %d already has EventLoop source entry", fd); return mStatus_AlreadyRegistered; }
+    if (*p)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "udsSupportAddFDToEventLoop: ERROR fd %d already has EventLoop source entry", fd);
+        return mStatus_AlreadyRegistered;
+    }
 
     KQSocketEventSource *newSource = (KQSocketEventSource*) callocL("KQSocketEventSource", sizeof(*newSource));
     if (!newSource) return mStatus_NoMemoryErr;
@@ -1670,7 +1684,7 @@ mDNSexport mStatus udsSupportAddFDToEventLoop(int fd, udsEventCallback callback,
         return mStatus_NoError;
     }
 
-    LogMsg("KQueueSet failed for fd %d errno %d (%s)", fd, errno, strerror(errno));
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "KQueueSet failed for fd %d errno %d (" PUB_S ")", fd, errno, strerror(errno));
     freeL("KQSocketEventSource", newSource);
     return mStatus_BadParamErr;
 }
@@ -1707,9 +1721,15 @@ mDNSexport mStatus udsSupportRemoveFDFromEventLoop(int fd, void *platform_data) 
 #if _BUILDING_XCODE_PROJECT_
 // If mDNSResponder crashes, then this string will be magically included in the automatically-generated crash log
 const char *__crashreporter_info__ = mDNSResponderVersionString;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wlanguage-extension-token"
 asm (".desc ___crashreporter_info__, 0x10");
+#pragma GCC diagnostic pop
 #endif
 
 // For convenience when using the "strings" command, this is the last thing in the file
 // The "@(#) " pattern is a special prefix the "what" command looks for
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdate-time"
 mDNSexport const char mDNSResponderVersionString_SCCS[] = "@(#) mDNSResponder " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
+#pragma GCC diagnostic pop

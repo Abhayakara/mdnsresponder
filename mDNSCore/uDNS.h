@@ -20,7 +20,6 @@
 #include "mDNSEmbeddedAPI.h"
 #include "DNSCommon.h"
 #include <sys/types.h>
-#include "dns_sd.h"
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
 #include "dso.h"

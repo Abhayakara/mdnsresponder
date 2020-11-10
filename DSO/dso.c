@@ -40,7 +40,7 @@
 
 #include "DNSCommon.h"
 #include "mDNSEmbeddedAPI.h"
-
+#include "mdns_strict.h"
 #include "dso.h"
 
 #ifdef STANDALONE
@@ -119,7 +119,7 @@ int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event)
             if (ap->finalize) {
                 ap->finalize(ap);
             }
-            free(ap);
+            mdns_free(ap);
         }
         if (dso->transport != NULL && dso->transport_finalize != NULL) {
             dso->transport_finalize(dso->transport);
@@ -131,7 +131,7 @@ int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event)
             dso->cb(dso->context, &disconnect_context, dso, kDSOEventType_Disconnected);
             dso->cb(dso->context, NULL, dso, kDSOEventType_Finalize);
         } else {
-            free(dso);
+            mdns_free(dso);
         }
     }
     dso_connections_needing_cleanup = NULL;
@@ -413,7 +413,7 @@ void dso_drop_activity(dso_state_t *dso, dso_activity_t *activity)
     }
 
     activity->finalize(activity);
-    free(activity);
+    mdns_free(activity);
 }
 
 void dso_ignore_response(dso_state_t *dso, void *context)
@@ -725,11 +725,11 @@ out:
 // This code is currently assuming that we won't get a DNS message, but that's not true.   Fix.
 void dns_message_received(dso_state_t *dso, const uint8_t *message, size_t message_length)
 {
-    DNSMessageHeader *header;
+    const DNSMessageHeader *header;
     int opcode, response;
 
     // We can safely assume that the header is 16-bit aligned.
-    header = (DNSMessageHeader *)message;
+    header = (const DNSMessageHeader *)message;
     opcode = header->flags.b[0] & kDNSFlag0_OP_Mask;
     response = (header->flags.b[0] & kDNSFlag0_QR_Mask) == kDNSFlag0_QR_Response;
 

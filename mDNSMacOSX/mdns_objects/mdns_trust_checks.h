@@ -17,7 +17,6 @@
 #ifndef __MDNS_TRUST_CHECKS_H__
 #define __MDNS_TRUST_CHECKS_H__
 
-#include "mdns_base.h"
 #include <dispatch/dispatch.h>
 
 OS_CLOSED_ENUM(trust_policy_state, int,
@@ -41,8 +40,8 @@ _mdns_trust_checks_policy_to_string(trust_policy_state_t state)
 		case trust_policy_state_denied:		return "denied";
 		case trust_policy_state_granted:	return "granted";
 		case trust_policy_state_pending:	return "pending";
-		default:							return "<INVALID STATE>";
 	}
+	return "<INVALID STATE>";
 }
 
 static inline const char *
@@ -52,8 +51,8 @@ _mdns_trust_checks_request_to_string(trust_request_t request)
 		case trust_request_bonjour:			return "bonjour";
 		case trust_request_reg_service:		return "reg_service";
 		case trust_request_query:			return "query";
-		default:							return "<INVALID REQUEST>";
 	}
+	return "<INVALID REQUEST>";
 }
 
 void
