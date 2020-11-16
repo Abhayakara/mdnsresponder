@@ -634,6 +634,7 @@ static void
 update_finalize(update_context_t *update)
 {
     client_state_t *client = update->client;
+    INFO("update_finalize: %p %p %p", update, update->udp_context, update->message);
     if (update->udp_context != NULL) {
         srp_deactivate_udp_context(client->os_context, update->udp_context);
     }
@@ -958,7 +959,8 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
             uint16_t opt_len = (((uint16_t)p[9]) << 8) + p[10]; // length of opt data
             const uint8_t *opt_cur = opt_start;
             uint16_t opt_remaining = opt_len;
-            while (opt_cur + opt_remaining <= end) {
+            // Scan for options until there's no room.
+            while (opt_cur + 4 <= end) {
                 int option_code = (((uint16_t)opt_cur[0]) << 8) + opt_cur[1];
                 int option_len =  (((uint16_t)opt_cur[2]) << 8) + opt_cur[3];
                 const uint8_t *option_data = opt_cur + 4;

@@ -44,9 +44,15 @@
 
 #define MDNS_UNION_MEMBER(NAME)	struct mdns_ ## NAME ## _s *	NAME
 
-#define MDNS_SPI_AVAILABLE_FALL_2021	SPI_AVAILABLE(macos(12.0), ios(15.0), watchos(8.0), tvos(15.0))
-
 #define MDNS_SPI_AVAILABLE(WHEN)	MDNS_SPI_AVAILABLE_ ## WHEN
+
+#if !defined(MDNS_UNSPECIFY_SPI_AVAILABILITY) || !MDNS_UNSPECIFY_SPI_AVAILABILITY
+	#define MDNS_SPI_AVAILABLE_FALL_2021	SPI_AVAILABLE(ios(15.0), macos(12.0), tvos(15.0), watchos(8.0), bridgeos(NA))
+#else
+	#define MDNS_EXPORT	__attribute__((visibility("default")))
+
+	#define MDNS_SPI_AVAILABLE_FALL_2021	MDNS_EXPORT
+#endif
 
 #define mdns_forget_with_invalidation(X, NAME)	\
 	do {										\

@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2007-2019 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2007-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -121,13 +120,11 @@ extern void mDNSNotify(const char *title, const char *msg);     // Both strings 
 extern void mDNSPreferencesSetName(int key, domainlabel *old, domainlabel *new);
 extern int  mDNSKeychainGetSecrets(CFArrayRef *secrets);
 extern void mDNSSendWakeupPacket(unsigned ifid, char *eth_addr, char *ip_addr, int iteration);
-extern void mDNSPacketFilterControl(uint32_t command, char * ifname, uint32_t count, pfArray_t portArray, pfArray_t protocolArray);
 extern void mDNSSendKeepalive(const v6addr_t sadd, const v6addr_t dadd, uint16_t lport, uint16_t rport, unsigned seq, unsigned ack, uint16_t win);
 extern int  mDNSRetrieveTCPInfo(int family, v6addr_t laddr, uint16_t lport, v6addr_t raddr, uint16_t rport, uint32_t *seq, uint32_t *ack, uint16_t *win, int32_t *intfid);
 
 extern void RequestBPF(void);
 extern void PreferencesSetName(int key, const char* old, const char* new);
-extern void PacketFilterControl(uint32_t command, const char * ifname, uint32_t count, pfArray_t portArray, pfArray_t protocolArray);
 extern void UserNotify(const char *title, const char *msg);     // Both strings are UTF-8 text
 extern void PowerRequest(int key, int interval, int *error);
 extern void SendWakeupPacket(unsigned int ifid, const char *eth_addr, const char *ip_addr, int iteration);

@@ -109,6 +109,10 @@ srp_deactivate_udp_context(void *host_context, void *in_context)
 
     err = validate_io_context(&io_context, in_context);
     if (err == kDNSServiceErr_NoError) {
+        if (io_context->wakeup != NULL) {
+            ioloop_cancel_wake_event(io_context->wakeup);
+            ioloop_wakeup_release(io_context->wakeup);
+        }
         if (io_context->connection) {
             ioloop_comm_release(io_context->connection);
         }

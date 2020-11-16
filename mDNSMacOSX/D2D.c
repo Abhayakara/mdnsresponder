@@ -753,11 +753,6 @@ mDNSexport void internal_start_advertising_service(const ResourceRecord *const r
 
     LogInfo("%s: %s", __func__, RRDisplayString(&mDNSStorage, resourceRecord));
 
-    // For SRV records, update packet filter if p2p interface already exists, otherwise,
-    // if will be updated when we get the KEV_DL_IF_ATTACHED event for the interface.
-    if (resourceRecord->rrtype == kDNSType_SRV)
-        mDNSUpdatePacketFilter(NULL);
-
     rhs = DNSNameCompressionBuildLHS(&lower, resourceRecord->rrtype);
     end = DNSNameCompressionBuildRHS(rhs, resourceRecord);
     PrintHelper(__func__, compression_lhs, rhs - compression_lhs, rhs, end - rhs);
@@ -806,11 +801,6 @@ mDNSexport void internal_stop_advertising_service(const ResourceRecord *const re
     DomainnameToLower(resourceRecord->name, &lower);
 
     LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "internal_stop_advertising_service: " PRI_S, RRDisplayString(&mDNSStorage, resourceRecord));
-
-    // For SRV records, update packet filter if p2p interface already exists, otherwise,
-    // For SRV records, update packet filter to to remove this port from list
-    if (resourceRecord->rrtype == kDNSType_SRV)
-        mDNSUpdatePacketFilter(resourceRecord);
 
     rhs = DNSNameCompressionBuildLHS(&lower, resourceRecord->rrtype);
     end = DNSNameCompressionBuildRHS(rhs, resourceRecord);

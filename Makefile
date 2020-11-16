@@ -17,7 +17,7 @@
 
 include $(MAKEFILEPATH)/pb_makefiles/platform.make
 
-MVERS = "mDNSResponder-1372"
+MVERS = "mDNSResponder-1377"
 
 projectdir		:= $(SRCROOT)/mDNSMacOSX
 buildsettings	:= OBJROOT='$(OBJROOT)' SYMROOT='$(SYMROOT)' DSTROOT='$(DSTROOT)' MVERS=$(MVERS) SDKROOT='$(SDKROOT)'

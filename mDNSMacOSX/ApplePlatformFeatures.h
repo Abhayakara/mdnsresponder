@@ -263,13 +263,21 @@
 
 // Feature: Symptoms Reporting
 // Radar:   <rdar://problem/20194922>
-// Enabled: Yes. (depends on MDNSRESPONDER_SUPPORTS_APPLE_AUDIT_TOKEN)
+// Enabled: Yes.
 
 #if !defined(MDNSRESPONDER_SUPPORTS_APPLE_SYMPTOMS)
+	#define MDNSRESPONDER_SUPPORTS_APPLE_SYMPTOMS       			1
+#endif
+
+// Feature: Symptoms Resolved Reporting
+// Radar:   <rdar://problem/60395415>
+// Enabled: Yes. (depends on MDNSRESPONDER_SUPPORTS_APPLE_AUDIT_TOKEN)
+
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_RESOLVED_SYMPTOM)
 	#if MDNSRESPONDER_SUPPORTS_APPLE_AUDIT_TOKEN
-		#define MDNSRESPONDER_SUPPORTS_APPLE_SYMPTOMS       		1
+		#define MDNSRESPONDER_SUPPORTS_APPLE_RESOLVED_SYMPTOM		1
 	#else
-		#define MDNSRESPONDER_SUPPORTS_APPLE_SYMPTOMS          		0
+		#define MDNSRESPONDER_SUPPORTS_APPLE_RESOLVED_SYMPTOM		0
 	#endif
 #endif
 

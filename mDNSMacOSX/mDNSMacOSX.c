@@ -93,7 +93,6 @@
 #include <mach/mach_port.h>
 #include <mach/mach_time.h>
 #include "helper.h"
-#include "P2PPacketFilter.h"
 
 #include <SystemConfiguration/SCPrivate.h>
 
@@ -5248,94 +5247,6 @@ exit:
     return(err);
 }
 
-#if TARGET_OS_OSX
-mDNSlocal void mDNSSetPacketFilterRules(char * ifname, const ResourceRecord *const excludeRecord)
-{
-    mDNS *const m = &mDNSStorage;
-    AuthRecord  *rr;
-    pfArray_t portArray;
-    pfArray_t protocolArray;
-    uint32_t count = 0;
-
-    for (rr = m->ResourceRecords; rr; rr=rr->next)
-    {
-        if ((rr->resrec.rrtype == kDNSServiceType_SRV) 
-            && ((rr->ARType == AuthRecordAnyIncludeP2P) || (rr->ARType == AuthRecordAnyIncludeAWDLandP2P)))
-        {
-            const mDNSu8    *p;
-
-            if (count >= PFPortArraySize)
-            {
-                LogMsg("mDNSSetPacketFilterRules: %d service limit, skipping %s", PFPortArraySize, ARDisplayString(m, rr));
-                continue;
-            }
-
-            if (excludeRecord && IdenticalResourceRecord(&rr->resrec, excludeRecord))
-            {
-                LogInfo("mDNSSetPacketFilterRules: record being removed, skipping %s", ARDisplayString(m, rr));
-                continue;
-            }
-
-            LogMsg("mDNSSetPacketFilterRules: found %s", ARDisplayString(m, rr));
-
-            portArray[count] = rr->resrec.rdata->u.srv.port.NotAnInteger;
-
-            // Assume <Service Instance>.<App Protocol>.<Transport Protocol>.<Name>
-            p = rr->resrec.name->c;
-
-            // Skip to App Protocol
-            if (p[0])
-                p += 1 + p[0];
-
-            // Skip to Transport Protocol
-            if (p[0])
-                p += 1 + p[0];
-
-            if      (SameDomainLabel(p, (mDNSu8 *)"\x4" "_tcp"))
-            {
-                protocolArray[count] = IPPROTO_TCP;
-            }
-            else if (SameDomainLabel(p, (mDNSu8 *)"\x4" "_udp"))
-            {
-                protocolArray[count] = IPPROTO_UDP;
-            }
-            else
-            {
-                LogMsg("mDNSSetPacketFilterRules: could not determine transport protocol of service");
-                LogMsg("mDNSSetPacketFilterRules: %s", ARDisplayString(m, rr));
-                return;
-            }
-            count++;
-        }
-    }
-    mDNSPacketFilterControl(PF_SET_RULES, ifname, count, portArray, protocolArray);
-}
-
-// If the p2p interface already exists, update the Bonjour packet filter rules for it.
-mDNSexport void mDNSUpdatePacketFilter(const ResourceRecord *const excludeRecord)
-{
-    mDNS *const m = &mDNSStorage;
-
-    NetworkInterfaceInfo *intf = GetFirstActiveInterface(m->HostInterfaces);
-    while (intf)
-    {
-        if (strncmp(intf->ifname, "p2p", 3) == 0)
-        {
-            LogInfo("mDNSInitPacketFilter: Setting rules for ifname %s", intf->ifname);
-            mDNSSetPacketFilterRules(intf->ifname, excludeRecord);
-            break;
-        }
-        intf = GetFirstActiveInterface(intf->next);
-    }
-}
-#else // !TARGET_OS_OSX
-// Currently no packet filter setup required on embedded platforms.
-mDNSexport void mDNSUpdatePacketFilter(const ResourceRecord *const excludeRecord)
-{
-    (void) excludeRecord; // unused
-}
-#endif
-
 // AWDL should no longer generate KEV_DL_MASTER_ELECTED events, so just log a message if we receive one.
 mDNSlocal void newMasterElected(struct net_event_data * ptr)
 {
@@ -5506,43 +5417,6 @@ mDNSlocal void SysEventCallBack(int s1, short __unused filter, void *context, __
 
         if (msg.k.event_code == KEV_DL_WAKEFLAGS_CHANGED || msg.k.event_code == KEV_DL_LINK_ON)
             SetNetworkChanged(mDNSPlatformOneSecond * 2);
-
-#if TARGET_OS_OSX
-        // For p2p interfaces, need to open the advertised service port in the firewall.
-        if (msg.k.event_code == KEV_DL_IF_ATTACHED)
-        {
-            struct net_event_data   * p;
-            p = (struct net_event_data *) &msg.k.event_data;
-
-            if (strncmp(p->if_name, "p2p", 3) == 0)
-            {
-                char ifname[IFNAMSIZ];
-                snprintf(ifname, IFNAMSIZ, "%s%d", p->if_name, p->if_unit);
-
-                LogInfo("SysEventCallBack: KEV_DL_IF_ATTACHED if_family = %d, if_unit = %d, if_name = %s", p->if_family, p->if_unit, p->if_name);
-
-                mDNSSetPacketFilterRules(ifname, NULL);
-            }
-        }
-
-        // For p2p interfaces, need to clear the firewall rules on interface detach
-        if (msg.k.event_code == KEV_DL_IF_DETACHED)
-        {
-            struct net_event_data   * p;
-            p = (struct net_event_data *) &msg.k.event_data;
-
-            if (strncmp(p->if_name, "p2p", 3) == 0)
-            {
-                pfArray_t portArray, protocolArray; // not initialized since count is 0 for PF_CLEAR_RULES
-                char ifname[IFNAMSIZ];
-                snprintf(ifname, IFNAMSIZ, "%s%d", p->if_name, p->if_unit);
-
-                LogInfo("SysEventCallBack: KEV_DL_IF_DETACHED if_family = %d, if_unit = %d, if_name = %s", p->if_family, p->if_unit, p->if_name);
-
-                mDNSPacketFilterControl(PF_CLEAR_RULES, ifname, 0, portArray, protocolArray);
-            }
-        }
-#endif
     }
 
     mDNS_Unlock(m);

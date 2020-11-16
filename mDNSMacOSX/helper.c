@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,7 +51,6 @@
 #include "dnssd_ipc.h"
 #include "helper.h"
 #include "helper-server.h"
-#include "P2PPacketFilter.h"
 #include "setup_assistant_helper.h"
 #include <stdatomic.h>
 
@@ -1109,37 +1108,6 @@ void SendWakeupPacket(unsigned int ifid, const char *eth_addr, const char *ip_ad
     os_log(log_handle, "SendWakeupPacket: sent broadcast eth_addr %s, ip_addr %s", eth_addr, ip_addr);
     
     close(bpf_fd);
-
-}
-
-
-// Open the specified port for protocol in the P2P firewall.
-void PacketFilterControl(uint32_t command, const char * ifname, uint32_t count, pfArray_t portArray, pfArray_t protocolArray)
-{
-    int error;
-    
-    os_log_info(log_handle,"PacketFilterControl: command %d ifname %s, count %d",
-                   command, ifname, count);
-    os_log_info(log_handle,"PacketFilterControl: portArray0[%d] portArray1[%d] portArray2[%d] portArray3[%d] protocolArray0[%d] protocolArray1[%d] protocolArray2[%d] protocolArray3[%d]", portArray[0], portArray[1], portArray[2], portArray[3], protocolArray[0], protocolArray[1], protocolArray[2], protocolArray[3]);
-    
-    switch (command)
-    {
-        case PF_SET_RULES:
-            error = P2PPacketFilterAddBonjourRuleSet(ifname, count, portArray, protocolArray);
-            if (error)
-                os_log(log_handle, "P2PPacketFilterAddBonjourRuleSet failed %s", strerror(error));
-            break;
-            
-        case PF_CLEAR_RULES:
-            error = P2PPacketFilterClearBonjourRules();
-            if (error)
-                os_log(log_handle, "P2PPacketFilterClearBonjourRules failed %s", strerror(error));
-            break;
-            
-        default:
-            os_log(log_handle, "PacketFilterControl: invalid command %d", command);
-            break;
-    }
 
 }
 

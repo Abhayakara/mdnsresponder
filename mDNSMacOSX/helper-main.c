@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -256,42 +256,6 @@ static void handle_request(xpc_object_t req)
             
             os_log_info(log_handle, "Calling new SetName() oldname: %s newname: %s key:%d", old_name, new_name, pref_key);
             PreferencesSetName(pref_key, old_name, new_name);
-            break;
-        }
-            
-        case p2p_packetfilter:
-        {
-            size_t count = 0;
-            pfArray_t pfports;
-            pfArray_t pfprotocols;
-            const char *if_name;
-            uint32_t cmd;
-            xpc_object_t xpc_obj_port_array;
-            size_t port_array_count = 0;
-            xpc_object_t xpc_obj_protocol_array;
-            size_t protocol_array_count = 0;
-            
-            cmd = xpc_dictionary_get_uint64(req, "pf_opcode");
-            if_name = xpc_dictionary_get_string(req, "pf_ifname");
-            xpc_obj_port_array = xpc_dictionary_get_value(req, "xpc_obj_array_port");
-            if ((void *)xpc_obj_port_array != NULL)
-                port_array_count = xpc_array_get_count(xpc_obj_port_array);
-            xpc_obj_protocol_array = xpc_dictionary_get_value(req, "xpc_obj_array_protocol");
-            if ((void *)xpc_obj_protocol_array != NULL)
-                protocol_array_count = xpc_array_get_count(xpc_obj_protocol_array);
-            if (port_array_count != protocol_array_count)
-                break;
-            if (port_array_count > PFPortArraySize)
-                break;
-            count = port_array_count;
-
-            for (size_t i = 0; i < count; i++) {
-                pfports[i] = (uint16_t)xpc_array_get_uint64(xpc_obj_port_array, i);
-                pfprotocols[i] = (uint16_t)xpc_array_get_uint64(xpc_obj_protocol_array, i);
-            }
-
-            os_log_info(log_handle,"Calling new PacketFilterControl()");
-            PacketFilterControl(cmd, if_name, count, pfports, pfprotocols);
             break;
         }
             

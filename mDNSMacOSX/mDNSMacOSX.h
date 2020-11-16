@@ -246,7 +246,6 @@ extern void SetDomainSecrets(mDNS *m);
 extern void mDNSMacOSXNetworkChanged(void);
 extern void mDNSMacOSXSystemBuildNumber(char *HINFO_SWstring);
 extern NetworkInterfaceInfoOSX *IfindexToInterfaceInfoOSX(mDNSInterfaceID ifindex);
-extern void mDNSUpdatePacketFilter(const ResourceRecord *const excludeRecord);
 extern void myKQSocketCallBack(int s1, short filter, void *context, mDNSBool encounteredEOF);
 extern void mDNSDynamicStoreSetConfig(enum mDNSDynamicStoreSetConfigKey key, const char *subkey, CFPropertyListRef value);
 extern void UpdateDebugState(void);

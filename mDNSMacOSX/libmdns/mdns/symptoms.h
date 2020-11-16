@@ -19,7 +19,7 @@
 
 #include <mdns/base.h>
 
-#include <MacTypes.h>
+#include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach.h>	// audit_token_t
 #include <sys/socket.h>
 
@@ -58,11 +58,11 @@ mdns_symptoms_report_responsive_server(const struct sockaddr *address);
  *	@brief
  *		Reports that a domain name was resolved.
  *
- *	@param domain
- *		The domain name.
+ *	@param names
+ *		The cname chain.
  *
- *	@param cname_count
- *		The number of CNAME referals that have been followed so far.
+ *	@param addrs
+ *		The resolved addresses.
  *
  *	@param token
  *		The peer's audit token.
@@ -75,18 +75,18 @@ mdns_symptoms_report_responsive_server(const struct sockaddr *address);
  */
 MDNS_SPI_AVAILABLE_FALL_2021
 void
-mdns_symptoms_report_resolving_symptom(const char *domain, uint32_t cname_count, audit_token_t token,
+mdns_symptoms_report_resolved(const CFArrayRef names, const CFArrayRef addrs, audit_token_t token,
 	bool in_app_browser_request, uint32_t request_id);
 
 /*!
  *	@brief
  *		Reports that a domain name was resolved on behalf of a delegator (by PID).
  *
- *	@param domain
- *		The domain name.
+ *	@param names
+ *		The cname chain.
  *
- *	@param cname_count
- *		The number of CNAME referals that have been followed so far.
+ *	@param addrs
+ *		The resolved addresses.
  *
  *	@param token
  *		The client peer's audit token.
@@ -102,18 +102,18 @@ mdns_symptoms_report_resolving_symptom(const char *domain, uint32_t cname_count,
  */
 MDNS_SPI_AVAILABLE_FALL_2021
 void
-mdns_symptoms_report_resolving_delegated_pid_symptom(const char *domain, uint32_t cname_count, audit_token_t token,
-	bool in_app_browser_request, uint32_t request_id, pid_t delegate_pid);
+mdns_symptoms_report_resolved_delegated_pid(const CFArrayRef names, const CFArrayRef addrs,
+	audit_token_t token, bool in_app_browser_request, uint32_t request_id, pid_t delegate_pid);
 
 /*!
  *	@brief
  *		Reports that a domain name was resolved on behalf of a delegator (by UUID).
  *
- *	@param domain
- *		The domain name.
+ *	@param names
+ *		The cname chain.
  *
- *	@param cname_count
- *		The number of CNAME referals that have been followed so far.
+ *	@param addrs
+ *		The resolved addresses.
  *
  *	@param token
  *		The client peer's audit token.
@@ -129,18 +129,18 @@ mdns_symptoms_report_resolving_delegated_pid_symptom(const char *domain, uint32_
  */
 MDNS_SPI_AVAILABLE_FALL_2021
 void
-mdns_symptoms_report_resolving_delegated_uuid_symptom(const char *domain, uint32_t cname_count, audit_token_t token,
-	bool in_app_browser_request, uint32_t request_id, const uuid_t _Nonnull delegate_uuid);
+mdns_symptoms_report_resolved_delegated_uuid(const CFArrayRef names, const CFArrayRef addrs,
+	audit_token_t token, bool in_app_browser_request, uint32_t request_id, const uuid_t _Nonnull delegate_uuid);
 
 /*!
  *	@brief
  *		Reports that a domain name was resolved on behalf of a delegator (by audit token).
  *
- *	@param domain
- *		The domain name.
+ *	@param names
+ *		The cname chain.
  *
- *	@param cname_count
- *		The number of CNAME referals that have been followed so far.
+ *	@param addrs
+ *		The resolved addresses.
  *
  *	@param token
  *		The client peer's audit token.
@@ -156,7 +156,7 @@ mdns_symptoms_report_resolving_delegated_uuid_symptom(const char *domain, uint32
  */
 MDNS_SPI_AVAILABLE_FALL_2021
 void
-mdns_symptoms_report_resolving_delegated_audit_token_symptom(const char *domain, uint32_t cname_count,
+mdns_symptoms_report_resolved_delegated_audit_token(const CFArrayRef names, const CFArrayRef addrs,
 	audit_token_t token, bool in_app_browser_request, uint32_t request_id, const audit_token_t *delegate_token);
 
 /*!

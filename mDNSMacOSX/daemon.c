@@ -57,6 +57,11 @@
 #include <mdns/managed_defaults.h>
 #include "QuerierSupport.h"
 #endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, RESOLVED_SYMPTOM)
+#include "resolved_cache.h"
+#endif
+
 #include "mdns_strict.h"
 
 #ifndef USE_SELECT_WITH_KQUEUEFD
@@ -1200,6 +1205,9 @@ mDNSlocal void * KQueueLoop(void *m_param)
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSD_XPC_SERVICE)
     dnssd_server_init();
+#endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, RESOLVED_SYMPTOM)
+    resolved_cache_idle();
 #endif
     pthread_mutex_lock(&PlatformStorage.BigMutex);
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "Starting time value 0x%08X (%d)", (mDNSu32)mDNSStorage.timenow_last, mDNSStorage.timenow_last);

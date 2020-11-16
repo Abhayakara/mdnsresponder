@@ -261,8 +261,8 @@ void ioloop_subproc_retain_(subproc_t *NONNULL subproc, const char *NONNULL file
 subproc_t *NULLABLE ioloop_subproc(const char *NONNULL exepath, char *NULLABLE *NONNULL argv, int argc,
                                    subproc_callback_t NULLABLE callback, io_callback_t NULLABLE output_callback,
                                    void *NULLABLE context);
-#define ioloop_dnssd_txn_add(ref, context, finalize, failure_callback) \
-    ioloop_dnssd_txn_add_(ref, context, finalize, failure_callback, __FILE__, __LINE__)
+#define ioloop_dnssd_txn_add(ref, context, finalize_callback, failure_callback) \
+    ioloop_dnssd_txn_add_(ref, context, finalize_callback, failure_callback, __FILE__, __LINE__)
 dnssd_txn_t *NULLABLE
 ioloop_dnssd_txn_add_(DNSServiceRef NONNULL ref, void *NULLABLE context,
                       dnssd_txn_finalize_callback_t NULLABLE callback,

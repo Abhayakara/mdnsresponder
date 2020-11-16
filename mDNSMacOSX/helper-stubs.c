@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -363,47 +363,6 @@ void mDNSSendWakeupPacket(unsigned int ifid, char *eth_addr, char *ip_addr, int 
     SendDict_ToServer(dict, NULL);
     MDNS_DISPOSE_XPC(dict);
 
-}
-
-void mDNSPacketFilterControl(uint32_t command, char * ifname, uint32_t count, pfArray_t portArray, pfArray_t protocolArray)
-{
-    struct
-    {
-        pfArray_t portArray;
-        pfArray_t protocolArray;
-    } pfa;
-    
-    mDNSPlatformMemCopy(pfa.portArray, portArray, sizeof(pfArray_t));
-    mDNSPlatformMemCopy(pfa.protocolArray, protocolArray, sizeof(pfArray_t));
-
-    mDNSHELPER_DEBUG("mDNSPacketFilterControl: XPC IPC, ifname %s", ifname);
-    
-    // Create Dictionary To Send
-    xpc_object_t dict = xpc_dictionary_create(NULL, NULL, 0);
-    xpc_dictionary_set_uint64(dict, kHelperMode, p2p_packetfilter);
-    
-    xpc_dictionary_set_uint64(dict, "pf_opcode", command);
-    if (ifname)
-        xpc_dictionary_set_string(dict, "pf_ifname", ifname);
-
-    xpc_object_t xpc_obj_portArray = xpc_array_create(NULL, 0);
-    xpc_object_t xpc_obj_protocolArray = xpc_array_create(NULL, 0);
-
-    for (size_t i = 0; i < count && i < PFPortArraySize; i++) {
-        xpc_array_set_uint64(xpc_obj_portArray, XPC_ARRAY_APPEND, pfa.portArray[i]);
-        xpc_array_set_uint64(xpc_obj_protocolArray, XPC_ARRAY_APPEND, pfa.protocolArray[i]);
-    }
-    xpc_dictionary_set_value(dict, "xpc_obj_array_port", xpc_obj_portArray);
-    xpc_dictionary_set_value(dict, "xpc_obj_array_protocol", xpc_obj_protocolArray);
-    MDNS_DISPOSE_XPC(xpc_obj_portArray);
-    MDNS_DISPOSE_XPC(xpc_obj_protocolArray);
-    
-    SendDict_ToServer(dict, NULL);
-    MDNS_DISPOSE_XPC(dict);
-
-    mDNSHELPER_DEBUG("mDNSPacketFilterControl: portArray0[%d] portArray1[%d] portArray2[%d] portArray3[%d] protocolArray0[%d] protocolArray1[%d] protocolArray2[%d] protocolArray3[%d]",
-            pfa.portArray[0], pfa.portArray[1], pfa.portArray[2], pfa.portArray[3], pfa.protocolArray[0], pfa.protocolArray[1], pfa.protocolArray[2], pfa.protocolArray[3]);
-    
 }
 
 void mDNSSendKeepalive(const v6addr_t sadd, const v6addr_t dadd, uint16_t lport, uint16_t rport, uint32_t seq, uint32_t ack, uint16_t win)
