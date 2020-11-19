@@ -35,6 +35,7 @@
 #include "mDNSEmbeddedAPI.h"    // Defines the interface provided to the client layer above
 #include "DNSCommon.h"
 #include "PlatformCommon.h"
+#include "mdns_strict.h"
 
 #ifdef NOT_HAVE_SOCKLEN_T
 typedef unsigned int socklen_t;
@@ -111,7 +112,7 @@ mDNSexport void *callocL(const char *msg, mDNSu32 size)
 {
     mDNSu32 guard[2];
     const mDNSu32 headerSize = 4 * sizeof(mDNSu32);
-    
+
     // Allocate space for two words of sanity checking data before the requested block and two words after.
     // Adjust the length for alignment.
     mDNSu32 *mem = (mDNSu32 *)calloc(1, headerSize + size);
@@ -188,7 +189,7 @@ mDNSexport void mDNSPlatformSourceAddrForDest(mDNSAddr *const src, const mDNSAdd
         addr.a6.sin6_family   = AF_INET6;
         addr.a6.sin6_flowinfo = 0;
         addr.a6.sin6_port     = 1;  // Not important, any port will do
-        addr.a6.sin6_addr     = *(struct in6_addr*)&dst->ip.v6;
+        addr.a6.sin6_addr     = *(const struct in6_addr*)&dst->ip.v6;
         addr.a6.sin6_scope_id = 0;
     }
     else return;
@@ -217,7 +218,7 @@ mDNSlocal mDNSBool GetConfigOption(char *dst, const char *option, FILE *f)
     {
         if (!strncmp(buf, option, len))
         {
-            strncpy(dst, buf + len + 1, MAX_ESCAPED_DOMAIN_NAME-1);
+            mDNSPlatformStrLCopy(dst, buf + len + 1, MAX_ESCAPED_DOMAIN_NAME-1);
             if (dst[MAX_ESCAPED_DOMAIN_NAME-1]) dst[MAX_ESCAPED_DOMAIN_NAME-1] = '\0';
             len = strlen(dst);
             if (len && dst[len-1] == '\n') dst[len-1] = '\0';  // chop newline
@@ -323,7 +324,7 @@ mDNSexport mDNSBool mDNSPosixTCPSocketSetup(int *fd, mDNSAddr_Type addrType, mDN
     {
         if (errno != EAFNOSUPPORT)
         {
-            LogMsg("mDNSPosixTCPSocketSetup: socket error %d errno %d (%s)", sock, errno, strerror(errno));
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "mDNSPosixTCPSocketSetup: socket error %d errno %d (" PUB_S ")", sock, errno, strerror(errno));
         }
         return mDNStrue;
     }
@@ -356,7 +357,7 @@ mDNSexport mDNSBool mDNSPosixTCPSocketSetup(int *fd, mDNSAddr_Type addrType, mDN
         err = bind(sock, &addr.sa, len);
         if (err < 0)
         {
-            LogMsg("mDNSPosixTCPSocketSetup getsockname: %s", strerror(errno));
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "mDNSPosixTCPSocketSetup getsockname: " PUB_S, strerror(errno));
             return mDNSfalse;
         }
     }
@@ -365,7 +366,7 @@ mDNSexport mDNSBool mDNSPosixTCPSocketSetup(int *fd, mDNSAddr_Type addrType, mDN
     err = getsockname(sock, (struct sockaddr *)&addr, &addrlen);
     if (err < 0)
     {
-        LogMsg("mDNSPosixTCPSocketSetup getsockname: %s", strerror(errno));
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "mDNSPosixTCPSocketSetup getsockname: " PUB_S, strerror(errno));
         return mDNSfalse;
     }
     if (sa_family == AF_INET6)
@@ -382,7 +383,7 @@ mDNSexport mDNSBool mDNSPosixTCPSocketSetup(int *fd, mDNSAddr_Type addrType, mDN
     err = setsockopt(sock, IPPROTO_TCP, TCP_NOTSENT_LOWAT, &lowWater, sizeof lowWater);
     if (err < 0)
     {
-        LogMsg("mDNSPosixTCPSocketSetup: TCP_NOTSENT_LOWAT failed: %s", strerror(errno));
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "mDNSPosixTCPSocketSetup: TCP_NOTSENT_LOWAT failed: " PUB_S, strerror(errno));
         return mDNSfalse;
     }
 
@@ -437,7 +438,7 @@ mDNSexport TCPSocket *mDNSPosixDoTCPListenCallback(int fd, mDNSAddr_Type address
         LogMsg("mDNSPosixDoTCPListenCallback: TCP_NOTSENT_LOWAT returned %d", errno);
         goto out;
     }
-    
+
     if (address.sa.sa_family == AF_INET6)
     {
         // If we are listening on an IPv4/IPv6 socket, the incoming address might be an IPv4-in-IPv6 address
@@ -506,7 +507,7 @@ mDNSexport TCPSocket *mDNSPosixDoTCPListenCallback(int fd, mDNSAddr_Type address
     nbp = namebuf + strlen(namebuf);
     *nbp++ = '%';
     snprintf(nbp, 6, "%u", ntohs(port.NotAnInteger));
-             
+
     sock = mDNSPlatformTCPAccept(socketFlags, remoteSock);
     if (sock == NULL)
     {
@@ -647,21 +648,21 @@ mDNSexport long mDNSPosixReadTCP(int fd, void *buf, unsigned long buflen, mDNSBo
 
     if (nread > 0)
     {
-        CLOSEDcount = 0; 
-        EAGAINcount = 0; 
+        CLOSEDcount = 0;
+        EAGAINcount = 0;
     } // On success, clear our error counters
     else if (nread == 0)
     {
         *closed = mDNStrue;
         if ((++CLOSEDcount % 20) == 0)
         {
-            LogMsg("ERROR: mDNSPosixReadFromSocket - recv %d got CLOSED %d times", fd, CLOSEDcount); 
+            LogMsg("ERROR: mDNSPosixReadFromSocket - recv %d got CLOSED %d times", fd, CLOSEDcount);
             assert(CLOSEDcount < 1000);
             // Recovery Mechanism to bail mDNSResponder out of trouble: Instead of logging the same error
             // msg multiple times, crash mDNSResponder using assert() and restart fresh. See advantages
             // below:
-            // 1.Better User Experience 
-            // 2.CrashLogs frequency can be monitored 
+            // 1.Better User Experience
+            // 2.CrashLogs frequency can be monitored
             // 3.StackTrace can be used for more info
         }
     }

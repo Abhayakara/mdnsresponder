@@ -17,7 +17,7 @@
 #ifndef __MDNS_TRUST_H__
 #define __MDNS_TRUST_H__
 
-#include "mdns_base.h"
+#include <mdns/base.h>
 #include <dispatch/dispatch.h>
 
 MDNS_DECL(trust);
@@ -49,8 +49,8 @@ mdns_trust_status_to_string(mdns_trust_status_t result)
 		case mdns_trust_status_granted:				return "granted";
 		case mdns_trust_status_pending:				return "pending";
 		case mdns_trust_status_no_entitlement:		return "no_entitlement";
-		default:									return "<INVALID RESULT>";
 	}
+	return "<INVALID RESULT>";
 }
 
 //======================================================================================================================
@@ -106,8 +106,8 @@ mdns_trust_event_to_string(const mdns_trust_event_t event)
 	switch (event) {
 		case mdns_trust_event_result:		return "result";
 		case mdns_trust_event_invalidated:	return "invalidated";
-		default:							return "<invalid event value>";
 	}
+	return "<invalid event value>";
 }
 
 typedef void

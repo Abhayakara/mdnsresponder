@@ -22,8 +22,10 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#ifdef POSIX_BUILD
 #include <limits.h>
 #include <sys/param.h>
+#endif
 
 #ifdef __clang__
 #define NULLABLE _Nullable
@@ -33,6 +35,10 @@
 #define NULLABLE
 #define NONNULL
 #define UNUSED __attribute__((unused))
+#ifdef POSIX_BUILD
+#else
+#define SRP_CRYPTO_MBEDTLS 1
+#endif // POSIX_BUILD
 #endif
 
 #ifdef DEBUG
@@ -49,54 +55,16 @@
 #endif
 #ifdef THREAD_DEVKIT_ADK
 
-    #include "nrf_delay.h"
+    #include "srp-platform.h"
 
-    #if !(DARWIN)
-        struct in_addr {
-            uint8_t s_addr;
-        };
-        typedef struct in6_addr {
-            union {
-                __uint8_t __u6_addr8[16];
-                __uint16_t __u6_addr16[8];
-                __uint32_t __u6_addr32[4];
-            } __u6_addr; /* 128-bit IP6 address */
-        } in6_addr_t;
-
-        #define s6_addr __u6_addr.__u6_addr8
-
-        #define ntohs(x) ((((uint16_t)(x) & 0xff00) >> 8) | (((uint16_t)(x) & 0xff) << 8))
-        #define htons(x) ntohs(x)
-
-        struct iovec {
-            void *base;
-            size_t len;
-        };
-    #endif // !(DARWIN)
-
-    #define OPENLOG(consolep)
-    #define DELAY 250
-    #define ERROR(fmt, ...) do {                               \
-            nrf_delay_ms(DELAY);                               \
-            HAPLogError(&kHAPLog_Default, fmt, ##__VA_ARGS__); \
-            nrf_delay_ms(DELAY);                               \
-        } while (0)
-    #define INFO(fmt, ...) do {                                \
-            nrf_delay_ms(DELAY);                               \
-            HAPLogInfo(&kHAPLog_Default, fmt, ##__VA_ARGS__);  \
-            nrf_delay_ms(DELAY);                               \
-        } while (0)
-
+    #define OPENLOG(consolep) srp_openlog(option)
+    #define ERROR(fmt, ...)   srp_log_error(fmt, ##__VA_ARGS__)
+    #define INFO(fmt, ...)    srp_log_info(fmt, ##__VA_ARGS__)
     #ifdef DEBUG_VERBOSE
-        #define DEBUG(fmt, ...) do {                               \
-                nrf_delay_ms(DELAY);                               \
-                HAPLogDebug(&kHAPLog_Default, fmt, ##__VA_ARGS__); \
-                nrf_delay_ms(DELAY);                               \
-            } while (0)
-    #else // ifdef DEBUG_VERBOSE
+        #define DEBUG(fmt, ...) srp_log_debug(fmt, ##__VA_ARGS__)
+    #else
         #define DEBUG(fmt, ...)
-    #endif // ifdef DEBUG_VERBOSE
-
+    #endif // DEBUG VERBOSE
     #define NO_CLOCK
 #else // ifdef THREAD_DEVKIT_ADK
 

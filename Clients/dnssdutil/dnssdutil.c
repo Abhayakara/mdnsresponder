@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-#include "DNSMessage.h"
 #include "DNSServerDNSSEC.h"
 
 #include <CoreUtils/CoreUtils.h>
 #include <dns_sd.h>
 #include <dns_sd_private.h>
+#include <mdns/DNSMessage.h>
 #include <pcap.h>
 
 #include CF_RUNTIME_HEADER
@@ -59,7 +59,8 @@
 	#include <CoreFoundation/CFXPCBridge.h>
 	#include <dns_services.h>
 	#include "dnssd_private.h"
-	#include "mdns_private.h"
+	#include <mdns/private.h>
+	#include <mdns/tcpinfo.h>
 	#include "TestUtils.h"
 	// Set ENABLE_DNSSDUTIL_DNSSEC_TEST to 1 to enable DNSSEC test functionality.
 	#define ENABLE_DNSSDUTIL_DNSSEC_TEST 0
@@ -2421,6 +2422,22 @@ static CLIOption		kGetAddrInfoNewOpts[] =
 
 static void	GetAddrInfoNewCommand( void );
 
+//===========================================================================================================================
+//	TCPInfo Command Options
+//===========================================================================================================================
+
+static const char *		gTCPInfo_LocalAddrStr	= NULL;
+static const char *		gTCPInfo_RemoteAddrStr	= NULL;
+
+static CLIOption		kTCPInfoOpts[] =
+{
+	StringOption( 'l', "local",  &gTCPInfo_LocalAddrStr,  "IP address+port", "TCP connection's local IPv4 or IPv6 address and port number.", true ),
+	StringOption( 'r', "remote", &gTCPInfo_RemoteAddrStr, "IP address+port", "TCP connection's remote IPv4 or IPv6 address and port number.", true ),
+	CLI_OPTION_END()
+};
+
+static void	TCPInfoCommand( void );
+
 #endif	// MDNSRESPONDER_PROJECT
 
 //===========================================================================================================================
@@ -2501,6 +2518,7 @@ static CLIOption		kGlobalOpts[] =
 	Command( "querier",				QuerierCommand,			kQuerierOpts,			"Sends a DNS query using mdns_querier.", true ),
 	Command( "dnsproxy",			DNSProxyCmd,			kDNSProxyOpts,			"Enables mDNSResponder's DNS proxy.", true ),
 	Command( "getaddrinfo-new",		GetAddrInfoNewCommand,	kGetAddrInfoNewOpts,	"Uses dnssd_getaddrinfo to resolve a hostname to IP addresses.", false ),
+	Command( "tcpinfo",				TCPInfoCommand,			kTCPInfoOpts,			"Uses mdns_tcpinfo_* to get TCP info.", true ),
 #endif
 	Command( "daemonVersion",		DaemonVersionCmd,		NULL,					"Prints the version of the DNS-SD daemon.", true ),
 	
@@ -2553,6 +2571,7 @@ static OSStatus			InterfaceIndexFromArgString( const char *inString, uint32_t *o
 static OSStatus			RecordDataFromArgString( const char *inString, uint8_t **outDataPtr, size_t *outDataLen );
 static OSStatus			RecordTypeFromArgString( const char *inString, uint16_t *outValue );
 static OSStatus			RecordClassFromArgString( const char *inString, uint16_t *outValue );
+static OSStatus			SockAddrFromArgString( const char *inString, const char *inArgName, sockaddr_ip *outSA );
 
 #define kInterfaceNameBufLen		( Max( IF_NAMESIZE, 16 ) + 1 )
 
@@ -5314,9 +5333,8 @@ typedef struct
 	
 }	RegisterKACmdContext;
 
-static void		_RegisterKACmdFree( RegisterKACmdContext *inCmd );
-static void		_RegisterKACmdStart( void *inContext );
-static OSStatus	_RegisterKACmdGetIPAddressArgument( const char *inArgStr, const char *inArgName, sockaddr_ip *outSA );
+static void	_RegisterKACmdFree( RegisterKACmdContext *inCmd );
+static void	_RegisterKACmdStart( void *inContext );
 
 static void	RegisterKACmd( void )
 {
@@ -5326,10 +5344,10 @@ static void	RegisterKACmd( void )
 	cmd = (RegisterKACmdContext *) calloc( 1, sizeof( *cmd ) );
 	require_action( cmd, exit, err = kNoMemoryErr );
 	
-	err = _RegisterKACmdGetIPAddressArgument( gRegisterKA_LocalAddress, "local IP address", &cmd->local );
+	err = SockAddrFromArgString( gRegisterKA_LocalAddress, "local IP address", &cmd->local );
 	require_noerr_quiet( err, exit );
 	
-	err = _RegisterKACmdGetIPAddressArgument( gRegisterKA_RemoteAddress, "remote IP address", &cmd->remote );
+	err = SockAddrFromArgString( gRegisterKA_RemoteAddress, "remote IP address", &cmd->remote );
 	require_noerr_quiet( err, exit );
 	
 	err = CheckIntegerArgument( gRegisterKA_Timeout, "timeout", 0, INT_MAX );
@@ -5415,26 +5433,6 @@ static void	_RegisterKACmdStart( void *inContext )
 	
 exit:
 	if( err ) _RegisterKACmdStop( cmd, err );
-}
-
-//===========================================================================================================================
-
-static OSStatus	_RegisterKACmdGetIPAddressArgument( const char *inArgStr, const char *inArgName, sockaddr_ip *outSA )
-{
-	OSStatus		err;
-	sockaddr_ip		sip;
-	
-	err = StringToSockAddr( inArgStr, &sip, sizeof( sip ), NULL );
-	if( !err && ( ( sip.sa.sa_family == AF_INET ) || ( sip.sa.sa_family == AF_INET6 ) ) )
-	{
-		if( outSA ) SockAddrCopy( &sip, outSA );
-	}
-	else
-	{
-		FPrintF( stderr, "error: Invalid %s: '%s'\n", inArgName, inArgStr );
-		err = kParamErr;
-	}
-	return( err );
 }
 
 //===========================================================================================================================
@@ -26007,6 +26005,134 @@ static void	_GetAddrInfoNewCmdRelease( GetAddrInfoNewCmd *me )
 }
 
 //===========================================================================================================================
+//	TCPInfoCommand
+//===========================================================================================================================
+
+static void	TCPInfoCommand( void )
+{
+	OSStatus			err;
+	sockaddr_ip			local, remote;
+	struct tcp_info		ti;
+	
+	err = SockAddrFromArgString( gTCPInfo_LocalAddrStr, "local IP address", &local );
+	require_noerr_return( err );
+	
+	err = SockAddrFromArgString( gTCPInfo_RemoteAddrStr, "remote IP address", &remote );
+	require_noerr_return( err );
+	cli_require_return( local.sa.sa_family == remote.sa.sa_family, "error: IP address version mismatch.\n" );
+	
+	FPrintF( stdout, "Local Address:  %##a\n", &local.sa );
+	FPrintF( stdout, "Remote Address: %##a\n", &remote.sa );
+	FPrintF( stdout, "Start time:     %{du:time}\n", NULL );
+	FPrintF( stdout, "---\n" );
+	
+	if( local.sa.sa_family == AF_INET )
+	{
+		err = mdns_tcpinfo_get_ipv4( ntohl( local.v4.sin_addr.s_addr ), ntohs( local.v4.sin_port ),
+			ntohl( remote.v4.sin_addr.s_addr ), ntohs( remote.v4.sin_port ), &ti );
+		cli_require_noerr_return( err, "error: mdns_tcpinfo_get_ipv4: %#m\n", err );
+	}
+	else
+	{
+		err = mdns_tcpinfo_get_ipv6( local.v6.sin6_addr.s6_addr, ntohs( local.v6.sin6_port ),
+			remote.v6.sin6_addr.s6_addr, ntohs( remote.v6.sin6_port ), &ti );
+		cli_require_noerr_return( err, "error: mdns_tcpinfo_get_ipv6: %#m\n", err );
+	}
+#define _TCPInfoPrint( INFO, FIELD )		FPrintF( stdout, "%-28s%llu\n", # FIELD, (unsigned long long)( (INFO)->FIELD ) )
+	_TCPInfoPrint( &ti, tcpi_state );
+	_TCPInfoPrint( &ti, tcpi_options );
+	_TCPInfoPrint( &ti, tcpi_snd_wscale );
+	_TCPInfoPrint( &ti, tcpi_rcv_wscale );
+	_TCPInfoPrint( &ti, tcpi_flags );
+	_TCPInfoPrint( &ti, tcpi_rto );
+	_TCPInfoPrint( &ti, tcpi_snd_mss );
+	_TCPInfoPrint( &ti, tcpi_rcv_mss );
+	_TCPInfoPrint( &ti, tcpi_rttcur );
+	_TCPInfoPrint( &ti, tcpi_srtt );
+	_TCPInfoPrint( &ti, tcpi_rttvar );
+	_TCPInfoPrint( &ti, tcpi_rttbest );
+	_TCPInfoPrint( &ti, tcpi_snd_ssthresh );
+	_TCPInfoPrint( &ti, tcpi_snd_cwnd );
+	_TCPInfoPrint( &ti, tcpi_rcv_space );
+	_TCPInfoPrint( &ti, tcpi_snd_wnd );
+	_TCPInfoPrint( &ti, tcpi_snd_nxt );
+	_TCPInfoPrint( &ti, tcpi_rcv_nxt );
+	_TCPInfoPrint( &ti, tcpi_last_outif );
+	_TCPInfoPrint( &ti, tcpi_snd_sbbytes );
+	_TCPInfoPrint( &ti, tcpi_txpackets );
+	_TCPInfoPrint( &ti, tcpi_txbytes );
+	_TCPInfoPrint( &ti, tcpi_txretransmitbytes );
+	_TCPInfoPrint( &ti, tcpi_txunacked );
+	_TCPInfoPrint( &ti, tcpi_rxpackets );
+	_TCPInfoPrint( &ti, tcpi_rxbytes );
+	_TCPInfoPrint( &ti, tcpi_rxduplicatebytes );
+	_TCPInfoPrint( &ti, tcpi_rxoutoforderbytes );
+	_TCPInfoPrint( &ti, tcpi_snd_bw );
+	_TCPInfoPrint( &ti, tcpi_synrexmits );
+	_TCPInfoPrint( &ti, tcpi_unused1 );
+	_TCPInfoPrint( &ti, tcpi_unused2 );
+	_TCPInfoPrint( &ti, tcpi_cell_rxpackets );
+	_TCPInfoPrint( &ti, tcpi_cell_rxbytes );
+	_TCPInfoPrint( &ti, tcpi_cell_txpackets );
+	_TCPInfoPrint( &ti, tcpi_cell_txbytes );
+	_TCPInfoPrint( &ti, tcpi_wifi_rxpackets );
+	_TCPInfoPrint( &ti, tcpi_wifi_rxbytes );
+	_TCPInfoPrint( &ti, tcpi_wifi_txpackets );
+	_TCPInfoPrint( &ti, tcpi_wifi_txbytes );
+	_TCPInfoPrint( &ti, tcpi_wired_rxpackets );
+	_TCPInfoPrint( &ti, tcpi_wired_rxbytes );
+	_TCPInfoPrint( &ti, tcpi_wired_txpackets );
+	_TCPInfoPrint( &ti, tcpi_wired_txbytes );
+	FPrintF( stdout, "tcpi_connstatus = {\n" );
+	FPrintF( stdout, "    probe_activated         %u\n", ti.tcpi_connstatus.probe_activated );
+	FPrintF( stdout, "    write_probe_failed      %u\n", ti.tcpi_connstatus.write_probe_failed );
+	FPrintF( stdout, "    read_probe_failed       %u\n", ti.tcpi_connstatus.read_probe_failed );
+	FPrintF( stdout, "    conn_probe_failed       %u\n", ti.tcpi_connstatus.conn_probe_failed );
+	FPrintF( stdout, "}\n" );
+	_TCPInfoPrint( &ti, tcpi_tfo_cookie_req );
+	_TCPInfoPrint( &ti, tcpi_tfo_cookie_rcv );
+	_TCPInfoPrint( &ti, tcpi_tfo_syn_loss );
+	_TCPInfoPrint( &ti, tcpi_tfo_syn_data_sent );
+	_TCPInfoPrint( &ti, tcpi_tfo_syn_data_acked );
+	_TCPInfoPrint( &ti, tcpi_tfo_syn_data_rcv );
+	_TCPInfoPrint( &ti, tcpi_tfo_cookie_req_rcv );
+	_TCPInfoPrint( &ti, tcpi_tfo_cookie_sent );
+	_TCPInfoPrint( &ti, tcpi_tfo_cookie_invalid );
+	_TCPInfoPrint( &ti, tcpi_tfo_cookie_wrong );
+	_TCPInfoPrint( &ti, tcpi_tfo_no_cookie_rcv );
+	_TCPInfoPrint( &ti, tcpi_tfo_heuristics_disable );
+	_TCPInfoPrint( &ti, tcpi_tfo_send_blackhole );
+	_TCPInfoPrint( &ti, tcpi_tfo_recv_blackhole );
+	_TCPInfoPrint( &ti, tcpi_tfo_onebyte_proxy );
+	_TCPInfoPrint( &ti, tcpi_ecn_client_setup );
+	_TCPInfoPrint( &ti, tcpi_ecn_server_setup );
+	_TCPInfoPrint( &ti, tcpi_ecn_success );
+	_TCPInfoPrint( &ti, tcpi_ecn_lost_syn );
+	_TCPInfoPrint( &ti, tcpi_ecn_lost_synack );
+	_TCPInfoPrint( &ti, tcpi_local_peer );
+	_TCPInfoPrint( &ti, tcpi_if_cell );
+	_TCPInfoPrint( &ti, tcpi_if_wifi );
+	_TCPInfoPrint( &ti, tcpi_if_wired );
+	_TCPInfoPrint( &ti, tcpi_if_wifi_infra );
+	_TCPInfoPrint( &ti, tcpi_if_wifi_awdl );
+	_TCPInfoPrint( &ti, tcpi_snd_background );
+	_TCPInfoPrint( &ti, tcpi_rcv_background );
+	_TCPInfoPrint( &ti, tcpi_ecn_recv_ce );
+	_TCPInfoPrint( &ti, tcpi_ecn_recv_cwr );
+	_TCPInfoPrint( &ti, tcpi_rcvoopack );
+	_TCPInfoPrint( &ti, tcpi_pawsdrop );
+	_TCPInfoPrint( &ti, tcpi_sack_recovery_episode );
+	_TCPInfoPrint( &ti, tcpi_reordered_pkts );
+	_TCPInfoPrint( &ti, tcpi_dsack_sent );
+	_TCPInfoPrint( &ti, tcpi_dsack_recvd );
+	_TCPInfoPrint( &ti, tcpi_flowhash );
+	_TCPInfoPrint( &ti, tcpi_txretransmitpackets );
+#undef _TCPInfoPrint
+	FPrintF( stdout, "---\n" );
+	FPrintF( stdout, "End time:       %{du:time}\n", NULL );
+}
+
+//===========================================================================================================================
 //    XCTestCmd
 //===========================================================================================================================
 
@@ -26678,6 +26804,28 @@ static OSStatus	RecordClassFromArgString( const char *inString, uint16_t *outVal
 	*outValue = (uint16_t) i32;
 	
 exit:
+	return( err );
+}
+
+//===========================================================================================================================
+//	SockAddrFromArgString
+//===========================================================================================================================
+
+static OSStatus	SockAddrFromArgString( const char *inArgStr, const char *inArgName, sockaddr_ip *outSA )
+{
+	OSStatus		err;
+	sockaddr_ip		sip;
+	
+	err = StringToSockAddr( inArgStr, &sip, sizeof( sip ), NULL );
+	if( !err && ( ( sip.sa.sa_family == AF_INET ) || ( sip.sa.sa_family == AF_INET6 ) ) )
+	{
+		if( outSA ) SockAddrCopy( &sip, outSA );
+	}
+	else
+	{
+		FPrintF( stderr, "error: Invalid %s: '%s'\n", inArgName, inArgStr );
+		err = kParamErr;
+	}
 	return( err );
 }
 

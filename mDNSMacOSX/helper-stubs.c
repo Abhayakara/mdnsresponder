@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@
 #include <arpa/inet.h>
 #include <xpc/private.h>
 #include <Block.h>
+#include "mdns_strict.h"
 
 //
 // Implementation Notes about the HelperQueue:
@@ -56,7 +57,7 @@ static void HelperLog(const char *prefix, xpc_object_t o)
 {
     char *desc = xpc_copy_description(o);
     mDNSHELPER_DEBUG("HelperLog %s: %s", prefix, desc);
-    free(desc);
+    mdns_free(desc);
 }
 
 //*************************************************************************************************************
@@ -131,7 +132,8 @@ mDNSlocal int SendDict_ToServer(xpc_object_t msg, xpc_object_t *out_reply)
         }
         
         dispatch_semaphore_signal(sem);
-        dispatch_release(sem);
+        dispatch_semaphore_t tmp = sem;
+        MDNS_DISPOSE_DISPATCH(tmp);
     });
     
     if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (maxwait_secs * NSEC_PER_SEC))) != 0)
@@ -155,16 +157,10 @@ exit:
     if (connection)
     {
         xpc_connection_cancel(connection);
-        xpc_release(connection);
+        MDNS_DISPOSE_XPC(connection);
     }
-    if (sem)
-    {
-        dispatch_release(sem);
-    }
-    if (reply)
-    {
-        xpc_release(reply);
-    }
+    MDNS_DISPOSE_DISPATCH(sem);
+    MDNS_DISPOSE_XPC(reply);
     return errorcode;
 }
 
@@ -209,9 +205,8 @@ void mDNSPreferencesSetName(int key, domainlabel *old, domainlabel *new)
     xpc_dictionary_set_string(dict, kPrefsNewName, names.newname);
     
     SendDict_ToServer(dict, NULL);
-    xpc_release(dict);
-    dict = NULL;
-    
+    MDNS_DISPOSE_XPC(dict);
+
 }
 
 void mDNSRequestBPF()
@@ -222,8 +217,7 @@ void mDNSRequestBPF()
      xpc_object_t dict = xpc_dictionary_create(NULL, NULL, 0);
      xpc_dictionary_set_uint64(dict, kHelperMode, bpf_request);
      SendDict_ToServer(dict, NULL);
-     xpc_release(dict);
-     dict = NULL;
+     MDNS_DISPOSE_XPC(dict);
 
 }
 
@@ -240,9 +234,8 @@ int mDNSPowerRequest(int key, int interval)
     xpc_dictionary_set_uint64(dict, "powerreq_interval", interval);
     
     err_code = SendDict_ToServer(dict, NULL);
-    xpc_release(dict);
-    dict = NULL;
-    
+    MDNS_DISPOSE_XPC(dict);
+
     mDNSHELPER_DEBUG("mDNSPowerRequest: Using XPC IPC returning error_code %d", err_code);
     return err_code;
 }
@@ -260,13 +253,12 @@ int mDNSSetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, co
     xpc_dictionary_set_uint64(dict, "slace_ifindex", ifindex);
     xpc_dictionary_set_uint64(dict, "slace_family", family);
     
-    xpc_dictionary_set_data(dict, "slace_ip", (uint8_t*)ip, sizeof(v6addr_t));
-    xpc_dictionary_set_data(dict, "slace_eth", (uint8_t*)eth, sizeof(ethaddr_t));
+    xpc_dictionary_set_data(dict, "slace_ip", (const uint8_t*)ip, sizeof(v6addr_t));
+    xpc_dictionary_set_data(dict, "slace_eth", (const uint8_t*)eth, sizeof(ethaddr_t));
     
     err_code = SendDict_ToServer(dict, NULL);
-    xpc_release(dict);
-    dict = NULL;
-    
+    MDNS_DISPOSE_XPC(dict);
+
     mDNSHELPER_DEBUG("mDNSSetLocalAddressCacheEntry: Using XPC IPC returning error_code %d", err_code);
     return err_code;
 }
@@ -284,9 +276,8 @@ void mDNSNotify(const char *title, const char *msg) // Both strings are UTF-8 te
     xpc_dictionary_set_string(dict, "notify_msg", msg);
     
     SendDict_ToServer(dict, NULL);
-    xpc_release(dict);
-    dict = NULL;
-    
+    MDNS_DISPOSE_XPC(dict);
+
 }
 
 
@@ -319,7 +310,7 @@ int mDNSKeychainGetSecrets(CFArrayRef *result)
     mDNSHELPER_DEBUG("mDNSKeychainGetSecrets: Using XPC IPC calling out to Helper: numsecrets is %u, secretsCnt is %u error_code is %d",
                      (unsigned int)numsecrets, (unsigned int)secretsCnt, error_code);
      
-    if (NULL == (bytes = CFDataCreateWithBytesNoCopy(kCFAllocatorDefault, (void*)sec, secretsCnt, kCFAllocatorNull)))
+    if (NULL == (bytes = CFDataCreateWithBytesNoCopy(kCFAllocatorDefault, (const void*)sec, secretsCnt, kCFAllocatorNull)))
     {
         error_code = kHelperErr_ApiErr;
         LogMsg("mDNSKeychainGetSecrets: CFDataCreateWithBytesNoCopy failed");
@@ -337,8 +328,7 @@ int mDNSKeychainGetSecrets(CFArrayRef *result)
     {
         error_code = kHelperErr_ApiErr;
         LogMsg("mDNSKeychainGetSecrets: Unexpected result type");
-        CFRelease(plist);
-        plist = NULL;
+        MDNS_DISPOSE_CF_OBJECT(plist);
         goto fin;
     }
     
@@ -346,16 +336,10 @@ int mDNSKeychainGetSecrets(CFArrayRef *result)
     
     
 fin:
-    if (bytes)
-        CFRelease(bytes);
-    if (dict)
-        xpc_release(dict);
-    if (reply_dict)
-        xpc_release(reply_dict);
-    
-    dict = NULL;
-    reply_dict = NULL;
-    
+    MDNS_DISPOSE_CF_OBJECT(bytes);
+    MDNS_DISPOSE_XPC(dict);
+    MDNS_DISPOSE_XPC(reply_dict);
+
     return error_code;
 }
 
@@ -377,51 +361,8 @@ void mDNSSendWakeupPacket(unsigned int ifid, char *eth_addr, char *ip_addr, int 
     xpc_dictionary_set_uint64(dict, "swp_iteration", iteration);
     
     SendDict_ToServer(dict, NULL);
-    xpc_release(dict);
-    dict = NULL;
+    MDNS_DISPOSE_XPC(dict);
 
-}
-
-void mDNSPacketFilterControl(uint32_t command, char * ifname, uint32_t count, pfArray_t portArray, pfArray_t protocolArray)
-{
-    struct
-    {
-        pfArray_t portArray;
-        pfArray_t protocolArray;
-    } pfa;
-    
-    mDNSPlatformMemCopy(pfa.portArray, portArray, sizeof(pfArray_t));
-    mDNSPlatformMemCopy(pfa.protocolArray, protocolArray, sizeof(pfArray_t));
-
-    mDNSHELPER_DEBUG("mDNSPacketFilterControl: XPC IPC, ifname %s", ifname);
-    
-    // Create Dictionary To Send
-    xpc_object_t dict = xpc_dictionary_create(NULL, NULL, 0);
-    xpc_dictionary_set_uint64(dict, kHelperMode, p2p_packetfilter);
-    
-    xpc_dictionary_set_uint64(dict, "pf_opcode", command);
-    if (ifname)
-        xpc_dictionary_set_string(dict, "pf_ifname", ifname);
-
-    xpc_object_t xpc_obj_portArray = xpc_array_create(NULL, 0);
-    xpc_object_t xpc_obj_protocolArray = xpc_array_create(NULL, 0);
-
-    for (size_t i = 0; i < count && i < PFPortArraySize; i++) {
-        xpc_array_set_uint64(xpc_obj_portArray, XPC_ARRAY_APPEND, pfa.portArray[i]);
-        xpc_array_set_uint64(xpc_obj_protocolArray, XPC_ARRAY_APPEND, pfa.protocolArray[i]);
-    }
-    xpc_dictionary_set_value(dict, "xpc_obj_array_port", xpc_obj_portArray);
-    xpc_dictionary_set_value(dict, "xpc_obj_array_protocol", xpc_obj_protocolArray);
-    xpc_release(xpc_obj_portArray);
-    xpc_release(xpc_obj_protocolArray);
-    
-    SendDict_ToServer(dict, NULL);
-    xpc_release(dict);
-    dict = NULL;
-    
-    mDNSHELPER_DEBUG("mDNSPacketFilterControl: portArray0[%d] portArray1[%d] portArray2[%d] portArray3[%d] protocolArray0[%d] protocolArray1[%d] protocolArray2[%d] protocolArray3[%d]",
-            pfa.portArray[0], pfa.portArray[1], pfa.portArray[2], pfa.portArray[3], pfa.protocolArray[0], pfa.protocolArray[1], pfa.protocolArray[2], pfa.protocolArray[3]);
-    
 }
 
 void mDNSSendKeepalive(const v6addr_t sadd, const v6addr_t dadd, uint16_t lport, uint16_t rport, uint32_t seq, uint32_t ack, uint16_t win)
@@ -444,8 +385,8 @@ void mDNSSendKeepalive(const v6addr_t sadd, const v6addr_t dadd, uint16_t lport,
     xpc_object_t dict = xpc_dictionary_create(NULL, NULL, 0);
     xpc_dictionary_set_uint64(dict, kHelperMode, send_keepalive);
     
-    xpc_dictionary_set_data(dict, "send_keepalive_sadd", (uint8_t*)sadd, sizeof(v6addr_t));
-    xpc_dictionary_set_data(dict, "send_keepalive_dadd", (uint8_t*)dadd, sizeof(v6addr_t));
+    xpc_dictionary_set_data(dict, "send_keepalive_sadd", (const uint8_t*)sadd, sizeof(v6addr_t));
+    xpc_dictionary_set_data(dict, "send_keepalive_dadd", (const uint8_t*)dadd, sizeof(v6addr_t));
     
     xpc_dictionary_set_uint64(dict, "send_keepalive_lport", lport);
     xpc_dictionary_set_uint64(dict, "send_keepalive_rport", rport);
@@ -454,59 +395,6 @@ void mDNSSendKeepalive(const v6addr_t sadd, const v6addr_t dadd, uint16_t lport,
     xpc_dictionary_set_uint64(dict, "send_keepalive_win", win);
     
     SendDict_ToServer(dict, NULL);
-    xpc_release(dict);
-    dict = NULL;
-    
-}
+    MDNS_DISPOSE_XPC(dict);
 
-int mDNSRetrieveTCPInfo(int family, v6addr_t laddr, uint16_t lport, v6addr_t raddr, uint16_t rport, uint32_t *seq, uint32_t *ack, uint16_t *win, int32_t *intfid)
-{
-    int error_code = kHelperErr_NotConnected;
-    xpc_object_t reply_dict = NULL;
-    
-    mDNSHELPER_DEBUG("mDNSRetrieveTCPInfo: Using XPC IPC calling out to Helper: lport is[%d] rport is[%d] family is[%d]",
-           lport, rport, family);
-    
-    char buf1[INET6_ADDRSTRLEN];
-    char buf2[INET6_ADDRSTRLEN];
-    buf1[0] = 0;
-    buf2[0] = 0;
-    
-    inet_ntop(AF_INET6, laddr, buf1, sizeof(buf1));
-    inet_ntop(AF_INET6, raddr, buf2, sizeof(buf2));
-    mDNSHELPER_DEBUG("mDNSRetrieveTCPInfo:: Using XPC IPC calling out to Helper: laddr is %s, raddr is %s", buf1, buf2);
-    
-    // Create Dictionary To Send
-    xpc_object_t dict = xpc_dictionary_create(NULL, NULL, 0);
-    xpc_dictionary_set_uint64(dict, kHelperMode, retreive_tcpinfo);
-    
-    xpc_dictionary_set_data(dict, "retreive_tcpinfo_laddr", (uint8_t*)laddr, sizeof(v6addr_t));
-    xpc_dictionary_set_data(dict, "retreive_tcpinfo_raddr", (uint8_t*)raddr, sizeof(v6addr_t));
-    
-    xpc_dictionary_set_uint64(dict, "retreive_tcpinfo_family", family);
-    xpc_dictionary_set_uint64(dict, "retreive_tcpinfo_lport", lport);
-    xpc_dictionary_set_uint64(dict, "retreive_tcpinfo_rport", rport);
-    
-    SendDict_ToServer(dict, &reply_dict);
-    
-    if (reply_dict != NULL)
-    {
-        *seq = (uint32_t)xpc_dictionary_get_uint64(reply_dict, "retreive_tcpinfo_seq");
-        *ack = (uint32_t)xpc_dictionary_get_uint64(reply_dict, "retreive_tcpinfo_ack");
-        *win = (uint16_t)xpc_dictionary_get_uint64(reply_dict, "retreive_tcpinfo_win");
-        *intfid = (int32_t)xpc_dictionary_get_uint64(reply_dict, "retreive_tcpinfo_ifid");
-        error_code = (int)xpc_dictionary_get_int64(reply_dict, kHelperErrCode);
-    }
-    
-    mDNSHELPER_DEBUG("mDNSRetrieveTCPInfo: Using XPC IPC calling out to Helper: seq is %d, ack is %d, win is %d, intfid is %d, error is %d",
-           *seq, *ack, *win, *intfid, error_code);
-    
-    if (dict)
-        xpc_release(dict);
-    if (reply_dict)
-        xpc_release(reply_dict);
-    dict = NULL;
-    reply_dict = NULL;
-
-    return error_code;
 }

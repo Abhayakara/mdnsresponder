@@ -31,7 +31,6 @@
 #include <sys/socket.h>      // For AF_INET, AF_INET6, etc.
 #include <net/if.h>          // For IF_NAMESIZE
 #include <netinet/in.h>      // For INADDR_NONE
-#include <netinet/tcp.h>     // For SOL_TCP, TCP_NOTSENT_LOWAT
 #include <arpa/inet.h>       // For inet_addr()
 #include <unistd.h>
 #include <errno.h>
@@ -42,6 +41,7 @@
 #include "mDNSEmbeddedAPI.h"
 #include "dso.h"
 #include "dso-transport.h"
+#include "mdns_strict.h"
 
 #ifdef DSO_USES_NETWORK_FRAMEWORK
 // Network Framework only works on MacOS X at the moment, and we need the locking primitives for
@@ -108,8 +108,8 @@ dso_transport_finalize(dso_transport_t *transport)
             tp = &transport->next;
         }
     }
-    free(transport);
-}
+    mdns_free(transport);
+}    
 
 // We do all of the finalization for the dso state object and any objects it depends on here in the
 // dso_idle function because it avoids the possibility that some code on the way out to the event loop
@@ -261,7 +261,8 @@ bool dso_write_finish(dso_transport_t *transport)
                            KQueueLock();
                            dso = dso_find_by_serial(serial);
                            if (error != NULL) {
-                               LogMsg("dso_write_finish: write failed: %s", strerror(nw_error_get_error_code(error)));
+                               const nw_error_t tmp = error;
+                               LogMsg("dso_write_finish: write failed: %s", strerror(nw_error_get_error_code(tmp)));
                                if (dso != NULL) {
                                    dso_drop(dso);
                                }
@@ -328,8 +329,8 @@ void dso_write(dso_transport_t *transport, const uint8_t *buf, size_t length)
     }
     if (transport->to_write != NULL) {
         dispatch_data_t dpc = dispatch_data_create_concat(transport->to_write, dpd);
-        dispatch_release(dpd);
-        dispatch_release(transport->to_write);
+        MDNS_DISPOSE_DISPATCH(dpd);
+        MDNS_DISPOSE_DISPATCH(transport->to_write);
         if (dpc == NULL) {
             transport->to_write = NULL;
             transport->write_failed = true;
@@ -467,11 +468,11 @@ static void dso_read_message_length(dso_transport_t *transport)
                                       goto fail;
                                   } else if (length_length != 2) {
                                       LogMsg("dso_read_message_length: invalid length = %d", length_length);
-                                      dispatch_release(map);
+                                      MDNS_DISPOSE_DISPATCH(map);
                                       goto fail;
                                   }
                                   length = ((unsigned)(lenbuf[0]) << 8) | ((unsigned)lenbuf[1]);
-                                  dispatch_release(map);
+                                  MDNS_DISPOSE_DISPATCH(map);
                                   dso_read_message(transport, length);
                               }
                               KQueueUnlock("dso_read_message_length completion routine");
@@ -512,7 +513,7 @@ void dso_read_message(dso_transport_t *transport, uint32_t length)
                                       goto fail;
                                   } else if (bytes_read != length) {
                                       LogMsg("dso_read_message_length: only %d of %d bytes read", bytes_read, length);
-                                      dispatch_release(map);
+                                      MDNS_DISPOSE_DISPATCH(map);
                                       goto fail;
                                   }
                                   // Process the message.
@@ -521,7 +522,7 @@ void dso_read_message(dso_transport_t *transport, uint32_t length)
                                   mDNS_Unlock(&mDNSStorage);
 
                                   // Release the map object now that we no longer need its buffers.
-                                  dispatch_release(map);
+                                  MDNS_DISPOSE_DISPATCH(map);
 
                                   // Now read the next message length.
                                   dso_read_message_length(transport);
@@ -774,7 +775,7 @@ dso_connect_state_t *dso_connect_state_create(const char *hostname, mDNSAddr *ad
     }
 
     len = (sizeof *cs) + detlen + hostlen;
-    csp = malloc(len);
+    csp = mdns_malloc(len);
     if (!csp) {
         return NULL;
     }
@@ -955,7 +956,7 @@ static void dso_connect_internal(dso_connect_state_t *cs)
                 }
             } else {
                 if (state == nw_connection_state_waiting) {
-                    LogMsg("connection to %#a%%%d is waiting", &ncs->addresses[ncs->cur_addr], ncs->ports[ncs->cur_addr]);
+                    LogMsg("connection to %#a%%%d is waiting", &ncs->addresses[ncs->cur_addr], ncs->ports[ncs->cur_addr].NotAnInteger);
 
                     // XXX the right way to do this is to just let NW Framework wait until we get a connection,
                     // but there are a bunch of problems with that right now.   First, will we get "waiting" on
@@ -972,7 +973,7 @@ static void dso_connect_internal(dso_connect_state_t *cs)
                 } else if (state == nw_connection_state_failed) {
                     // We tried to connect, but didn't succeed.
                     LogMsg("dso_connect_internal: failed to connect to %s on %#a%%%d: %s%s",
-                           ncs->hostname, &ncs->addresses[ncs->cur_addr], ncs->ports[ncs->cur_addr],
+                           ncs->hostname, &ncs->addresses[ncs->cur_addr], ncs->ports[ncs->cur_addr].NotAnInteger,
                            strerror(nw_error_get_error_code(error)), ncs->detail);
                     nw_release(ncs->connection);
                     ncs->connection = NULL;
@@ -1118,8 +1119,8 @@ static void dso_inaddr_callback(DNSServiceRef sdRef, DNSServiceFlags flags, uint
 
     cs->last_event = m->timenow;
     inet_ntop(sa->sa_family, (sa->sa_family == AF_INET
-                              ? (void *)&((struct sockaddr_in *)sa)->sin_addr
-                              : (void *)&((struct sockaddr_in6 *)sa)->sin6_addr), addrbuf, sizeof addrbuf);
+                              ? (const void *)&((const struct sockaddr_in *)sa)->sin_addr
+                              : (const void *)&((const struct sockaddr_in6 *)sa)->sin6_addr), addrbuf, sizeof addrbuf);
     LogMsg("dso_inaddr_callback: %s: flags %x index %d error %d fullname %s addr %s ttl %lu",
            cs->hostname, flags, interfaceIndex, errorCode, fullname, addrbuf, (unsigned long)ttl);
 
@@ -1142,11 +1143,11 @@ static void dso_inaddr_callback(DNSServiceRef sdRef, DNSServiceFlags flags, uint
     if (sa->sa_family == AF_INET) {
         cs->addresses[cs->num_addrs].type = mDNSAddrType_IPv4;
         mDNSPlatformMemCopy(&cs->addresses[cs->num_addrs].ip.v4,
-                            &((struct sockaddr_in *)sa)->sin_addr, sizeof cs->addresses[cs->num_addrs].ip.v4);
+                            &((const struct sockaddr_in *)sa)->sin_addr, sizeof cs->addresses[cs->num_addrs].ip.v4);
     } else {
         cs->addresses[cs->num_addrs].type = mDNSAddrType_IPv6;
         mDNSPlatformMemCopy(&cs->addresses[cs->num_addrs].ip.v6,
-                            &((struct sockaddr_in *)sa)->sin_addr, sizeof cs->addresses[cs->num_addrs].ip.v6);
+                            &((const struct sockaddr_in *)sa)->sin_addr, sizeof cs->addresses[cs->num_addrs].ip.v6);
     }
 
     cs->ports[cs->num_addrs] = cs->config_port;

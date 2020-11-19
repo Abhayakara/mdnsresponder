@@ -17,7 +17,7 @@
 #import "mDNSEmbeddedAPI.h"
 #import "mdns_trust.h"
 #import "mdns_trust_checks.h"
-#import "mdns_helpers.h"
+#import "helpers.h"
 
 #if TARGET_OS_IOS && (TARGET_OS_EMBEDDED || TARGET_OS_SIMULATOR || !TARGET_OS_IOSMAC)
 #define USE_IOS_LIBS	1
@@ -42,6 +42,7 @@
 #import <os/feature_private.h>
 #import <xpc/private.h>
 #import <stdatomic.h>
+#import "mdns_strict.h"
 
 #define BROWSE_ALL_SERVICES_PRIVATE_ENTITLEMENT		"com.apple.developer.networking.multicast"
 #define ON_DEMAND_ENTITLEMENT						"com.apple.developer.on-demand-install-capable"
@@ -75,12 +76,14 @@ static void
 _mdns_trust_post_analytic(const mdns_trust_check_t me, const LSBundleProxy * bundle_proxy,
 	const NSArray * _Nullable services)
 {
+	NSArray * _services = services ? services : @[];
+	NSString * _service_name = [NSString stringWithUTF8String:me->service_name];
 	AnalyticsSendEvent(@"com.apple.network.localnetwork.check",
 					   @{@"bundleID"	: bundle_proxy.bundleIdentifier,
 						 @"entitlement"	: (me->flags & mdns_trust_flags_entitlement) ? @YES : @NO,
 						 @"allowed"		: (me->entitlement_allowed) ? @YES : @NO,
-						 @"services"	: services ?: @[],
-						 @"service"		: [NSString stringWithUTF8String:me->service_name]});
+						 @"services"	: _services,
+						 @"service"		: _service_name});
 }
 
 static bool
@@ -285,12 +288,8 @@ _mdns_trust_checks_codesigned_by_apple(const LSBundleProxy *bundle_proxy)
     err = SecStaticCodeCheckValidity(code, kSecCSDefaultFlags, requirement);
 
 exit:
-	if (code) {
-		CFRelease(code);
-	}
-	if (requirement) {
-		CFRelease(requirement);
-	}
+	MDNS_DISPOSE_CF_OBJECT(code);
+	MDNS_DISPOSE_CF_OBJECT(requirement);
 
     return (err == noErr);
 }
@@ -541,11 +540,18 @@ mdns_trust_checks_local_network_access_policy_update(audit_token_t *audit_token,
 #ifdef NE_HAS_SHOW_LOCAL_NETWORK_ALERT_FOR_APP
 		if ([NEConfigurationManager class] && state == trust_policy_state_pending) {
 			os_log_info(_mdns_trust_log(), "Local network alert for (%{public}@) query(%{public}s).", bundle_proxy.localizedShortName, query ?: "local");
+			NSString * _query;
+			if (query) {
+				const char * const tmp = query;
+				_query = [NSString stringWithUTF8String:tmp];
+			} else {
+				_query = @"local";
+			}
 			NEConfigurationManager *sharedManager = [NEConfigurationManager sharedManagerForAllUsers];
 			[sharedManager showLocalNetworkAlertForApp:bundle_proxy.bundleIdentifier
 								   withCompletionQueue:queue
 #ifdef NE_HAS_SHOW_LOCAL_NETWORK_ALERT_FOR_APP_EXTENDED
-												 query:query ? [NSString stringWithUTF8String:query] : @"local"
+												 query:_query
 										hasEntitlement:(flags & mdns_trust_flags_entitlement) ? YES : NO
 #endif
 											   handler:^(BOOL allowed) {

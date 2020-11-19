@@ -198,7 +198,7 @@ mDNSlocal mStatus InitEtcHostsRecords(void)
 					(DNSServiceErrorType)htonl(kDNSServiceErr_NoSuchRecord));	// Regress <rdar://problem/24827555>
 
 	// Simulate what udsserver_idle normally does for clean up
-	freeL("StartLocalOnlyClientQueryRequest:reply", reply);
+	free(reply);
 	req->replies = NULL;
 
 	// Simulate the query time out of the local-only question.

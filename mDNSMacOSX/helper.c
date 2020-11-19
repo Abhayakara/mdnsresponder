@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,14 +44,12 @@
 #include <TargetConditionals.h>
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #include <net/bpf.h>
-#include <sys/sysctl.h>
 
 #include "mDNSEmbeddedAPI.h"
 #include "dns_sd.h"
 #include "dnssd_ipc.h"
 #include "helper.h"
 #include "helper-server.h"
-#include "P2PPacketFilter.h"
 #include "setup_assistant_helper.h"
 #include <stdatomic.h>
 
@@ -70,7 +68,7 @@
 #endif
 
 // Embed the client stub code here, so we can access private functions like ConnectToServer, create_hdr, deliver_request
-#define XPC_AUTH_CONNECTION   0
+#define MDNS_NO_STRICT     1
 #include "../mDNSShared/dnssd_ipc.c"
 #include "../mDNSShared/dnssd_clientstub.c"
 
@@ -1112,37 +1110,6 @@ void SendWakeupPacket(unsigned int ifid, const char *eth_addr, const char *ip_ad
 
 }
 
-
-// Open the specified port for protocol in the P2P firewall.
-void PacketFilterControl(uint32_t command, const char * ifname, uint32_t count, pfArray_t portArray, pfArray_t protocolArray)
-{
-    int error;
-    
-    os_log_info(log_handle,"PacketFilterControl: command %d ifname %s, count %d",
-                   command, ifname, count);
-    os_log_info(log_handle,"PacketFilterControl: portArray0[%d] portArray1[%d] portArray2[%d] portArray3[%d] protocolArray0[%d] protocolArray1[%d] protocolArray2[%d] protocolArray3[%d]", portArray[0], portArray[1], portArray[2], portArray[3], protocolArray[0], protocolArray[1], protocolArray[2], protocolArray[3]);
-    
-    switch (command)
-    {
-        case PF_SET_RULES:
-            error = P2PPacketFilterAddBonjourRuleSet(ifname, count, portArray, protocolArray);
-            if (error)
-                os_log(log_handle, "P2PPacketFilterAddBonjourRuleSet failed %s", strerror(error));
-            break;
-            
-        case PF_CLEAR_RULES:
-            error = P2PPacketFilterClearBonjourRules();
-            if (error)
-                os_log(log_handle, "P2PPacketFilterClearBonjourRules failed %s", strerror(error));
-            break;
-            
-        default:
-            os_log(log_handle, "PacketFilterControl: invalid command %d", command);
-            break;
-    }
-
-}
-
 static unsigned long in_cksum(unsigned short *ptr, int nbytes)
 {
     unsigned long sum;
@@ -1416,75 +1383,4 @@ again:
     }
     close(sock);
 
-}
-
-
-void RetrieveTCPInfo(int family, const v6addr_t laddr, uint16_t lport, const v6addr_t raddr, uint16_t  rport, uint32_t *seq, uint32_t *ack, uint16_t *win, int32_t *intfid, int *err)
-{
-    
-    struct tcp_info   ti;
-    struct info_tuple itpl;
-    int               mib[4];
-    unsigned int      miblen;
-    size_t            len;
-    size_t            sz;
-    
-    memset(&itpl, 0, sizeof(struct info_tuple));
-    memset(&ti,   0, sizeof(struct tcp_info));
-    
-    char buf1[INET6_ADDRSTRLEN];
-    char buf2[INET6_ADDRSTRLEN];
-    
-    buf1[0] = 0;
-    buf2[0] = 0;
-    
-    inet_ntop(AF_INET6, laddr, buf1, sizeof(buf1));
-    inet_ntop(AF_INET6, raddr, buf2, sizeof(buf2));
-
-    os_log_info(log_handle, "RetrieveTCPInfo invoked: laddr is %s, raddr is %s", buf1, buf2);
-    
-    os_log_info(log_handle,"RetrieveTCPInfo invoked: lport is[%d] rport is[%d] family is [%d]",
-                   lport, rport, family);
-
-    if (family == AF_INET)
-    {
-        memcpy(&itpl.itpl_local_sin.sin_addr,  laddr, sizeof(struct in_addr));
-        memcpy(&itpl.itpl_remote_sin.sin_addr, raddr, sizeof(struct in_addr));
-        itpl.itpl_local_sin.sin_port    = lport;
-        itpl.itpl_remote_sin.sin_port   = rport;
-        itpl.itpl_local_sin.sin_family  = AF_INET;
-        itpl.itpl_remote_sin.sin_family = AF_INET;
-    }
-    else
-    {
-        memcpy(&itpl.itpl_local_sin6.sin6_addr,  laddr, sizeof(struct in6_addr));
-        memcpy(&itpl.itpl_remote_sin6.sin6_addr, raddr, sizeof(struct in6_addr));
-        itpl.itpl_local_sin6.sin6_port    = lport;
-        itpl.itpl_remote_sin6.sin6_port   = rport;
-        itpl.itpl_local_sin6.sin6_family  = AF_INET6;
-        itpl.itpl_remote_sin6.sin6_family = AF_INET6;
-    }
-    itpl.itpl_proto = IPPROTO_TCP;
-    sz = sizeof(mib)/sizeof(mib[0]);
-    if (sysctlnametomib("net.inet.tcp.info", mib, &sz) == -1)
-    {
-        const int sysctl_errno = errno;
-        os_log(log_handle, "RetrieveTCPInfo: sysctlnametomib failed %d, %s", sysctl_errno, strerror(sysctl_errno));
-        *err = sysctl_errno;
-    }
-    miblen = (unsigned int)sz;
-    len    = sizeof(struct tcp_info);
-    if (sysctl(mib, miblen, &ti, &len, &itpl, sizeof(struct info_tuple)) == -1)
-    {
-        const int sysctl_errno = errno;
-        os_log(log_handle, "RetrieveTCPInfo: sysctl failed %d, %s", sysctl_errno, strerror(sysctl_errno));
-        *err = sysctl_errno;
-    }
-    
-    *seq    = ti.tcpi_snd_nxt - 1;
-    *ack    = ti.tcpi_rcv_nxt;
-    *win    = ti.tcpi_rcv_space >> ti.tcpi_rcv_wscale;
-    *intfid = ti.tcpi_last_outif;
-    *err    = KERN_SUCCESS;
-    
 }

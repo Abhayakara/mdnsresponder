@@ -52,7 +52,6 @@
 
 io_t *ios;
 wakeup_t *wakeups;
-int wakeup_list_serial;
 subproc_t *subprocesses;
 int64_t ioloop_now;
 
@@ -223,13 +222,11 @@ add_remove_wakeup(wakeup_t *wakeup, bool remove)
         if (*p_wakeups != NULL) {
             *p_wakeups = wakeup->next;
             wakeup->next = NULL;
-            wakeup_list_serial++;
         }
     } else {
         if (*p_wakeups == NULL) {
             *p_wakeups = wakeup;
             wakeup->next = NULL;
-            wakeup_list_serial++;
         }
     }
 }
@@ -272,6 +269,7 @@ ioloop_wakeup_create(void)
 bool
 ioloop_add_wake_event(wakeup_t *wakeup, void *context, wakeup_callback_t callback, wakeup_callback_t finalize, int milliseconds)
 {
+    INFO("ioloop_add_wake_event: %p %p %d", wakeup, context, milliseconds);
     add_remove_wakeup(wakeup, false);
     wakeup->wakeup_time = ioloop_timenow() + milliseconds;
     wakeup->finalize = finalize;
@@ -354,23 +352,18 @@ start_over:
     while (*p_wakeup) {
         wakeup = *p_wakeup;
         if (wakeup->wakeup_time != 0) {
-            int serial = wakeup_list_serial;
-
-            // We loop here in case the wakeup callback sets another wakeup--if it does, we check
-            // again.
-
             if (wakeup->wakeup_time <= ioloop_now) {
                 *p_wakeup = wakeup->next;
                 wakeup->wakeup_time = 0;
                 wakeup->wakeup(wakeup->context);
                 ++nev;
 
-                // It is possible that the callback will have modified the list; in this case we start over; this should be safe
-                // because any wakeup events we encountered this time through will have been reset either to zero or to a new
-                // time in the future, and hence will not trigger a new callback.
-                if (wakeup_list_serial != serial) {
-                    goto start_over;
-                }
+                // In case either wakeup has been freed, or a new wakeup has been added, we need to start
+                // at the beginning again. This wakeup will never still be on the list unless it's been
+                // re-added with a later time, so this should always have the effect that every wakeup that's
+                // ready gets its callback called, and when all wakeups that are ready have been called,
+                // there are no wakeups that are ready remaining on the list, so our loop exits.
+                goto start_over;
             } else {
                 p_wakeup = &wakeup->next;
             }

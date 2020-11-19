@@ -16,7 +16,9 @@
 
 #include "dnssd_svcb.h"
 
+#include <CoreUtils/CoreUtils.h>
 #include <netinet/in.h>
+#include "mdns_strict.h"
 
 typedef enum
 {
@@ -129,9 +131,9 @@ dnssd_svcb_copy_domain(const uint8_t *buffer, size_t buffer_size)
 		return NULL;
 	}
 
-	char *name_str = calloc(1, DNSSD_MAX_ESCAPED_DOMAIN_NAME);
+	char *name_str = (char *)mdns_calloc(1, DNSSD_MAX_ESCAPED_DOMAIN_NAME);
 	if (_dnssd_svcb_get_string_from_domain_name(buffer, name_str) == NULL) {
-		free(name_str);
+		ForgetMem(&name_str);
 		return NULL;
 	}
 	return name_str;
@@ -281,7 +283,7 @@ dnssd_svcb_copy_ech_config(const uint8_t *buffer, size_t buffer_size, size_t *ou
 	__block uint8_t *ech_config = NULL;
 	(void)_dnssd_svcb_extract_values(buffer, buffer_size, dnssd_svcb_key_ech_config, ^bool(const void *value, size_t value_size) {
 		if (value != NULL && value_size > 0) {
-			ech_config = calloc(1, value_size);
+			ech_config = (uint8_t *)mdns_calloc(1, value_size);
 			*out_length = value_size;
 			memcpy(ech_config, value, value_size);
 		}

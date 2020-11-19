@@ -53,6 +53,7 @@
 #include "mDNSUNP.h"
 #include "GenLinkedList.h"
 #include "dnsproxy.h"
+#include "mdns_strict.h"
 
 // ***************************************************************************
 // Structures
@@ -390,7 +391,7 @@ mDNSexport TCPSocket *mDNSPlatformTCPSocket(TCPSocketFlags flags, mDNSAddr_Type 
     {
         len += sizeof (domainname);
     }
-    sock = malloc(len);
+    sock = mdns_malloc(len);
 
     if (sock == NULL)
     {
@@ -409,9 +410,9 @@ mDNSexport TCPSocket *mDNSPlatformTCPSocket(TCPSocketFlags flags, mDNSAddr_Type 
     sock->events.fd = -1;
     if (!mDNSPosixTCPSocketSetup(&sock->events.fd, addrType, port, &sock->port))
     {
-      if (sock->events.fd != -1) close(sock->events.fd);
-      free(sock);
-      return mDNSNULL;
+        if (sock->events.fd != -1) close(sock->events.fd);
+        mdns_free(sock);
+        return mDNSNULL;
     }
 
     // Set up the other fields in the structure.
@@ -480,7 +481,7 @@ mDNSexport TCPListener *mDNSPlatformTCPListen(mDNSAddr_Type addrType, mDNSIPPort
         }
         return mDNSNULL;
     }
-    
+
     // Allocate a listener structure
     ret = (TCPListener *) mDNSPlatformMemAllocateClear(sizeof *ret);
     if (ret == NULL)
@@ -577,7 +578,7 @@ mDNSexport mStatus mDNSPlatformTCPConnect(TCPSocket *sock, const mDNSAddr *dst, 
 #else
             (void)iface;
 #endif // IPV6_BOUND_IF
-        }           
+        }
 #endif // SO_BINDTODEVICE
     }
 
@@ -614,12 +615,12 @@ mDNSexport mStatus mDNSPlatformTCPConnect(TCPSocket *sock, const mDNSAddr *dst, 
                     sock->events.fd, errno, strerror(errno));
         }
         else
-        { 
+        {
             LogMsg("ERROR: mDNSPlatformTCPConnect - connect failed: socket %d: Error %d (%s) length %d",
                    sock->events.fd, errno, strerror(errno), len);
         }
         return mStatus_ConnFailed;
-    }       
+    }
 
     LogMsg("NOTE: mDNSPlatformTCPConnect completed synchronously");
     return mStatus_NoError;
@@ -633,14 +634,14 @@ mDNSexport void mDNSPlatformTCPCloseConnection(TCPSocket *sock)
         stopReadOrWriteEvents(sock->events.fd, mDNSfalse, mDNStrue,
                               PosixEventFlag_Read | PosixEventFlag_Write);
         close(sock->events.fd);
-        free(sock);
+        mdns_free(sock);
     }
 }
 
 mDNSexport long mDNSPlatformReadTCP(TCPSocket *sock, void *buf, unsigned long buflen, mDNSBool * closed)
 {
     ssize_t nread;
-    
+
     *closed = mDNSfalse;
     if (sock->flags & kTCPSocketFlags_UseTLS)
     {
@@ -892,7 +893,7 @@ mDNSlocal void FreePosixNetworkInterface(PosixNetworkInterface *intf)
 {
     int rv;
     assert(intf != NULL);
-    if (intf->intfName != NULL) free((void *)intf->intfName);
+    if (intf->intfName != NULL) mdns_free(intf->intfName);
     if (intf->multicastSocket4 != -1)
     {
         rv = close(intf->multicastSocket4);
@@ -1193,7 +1194,7 @@ mDNSlocal int SetupOneInterface(mDNS *const m, struct sockaddr *intfAddr, struct
     assert(intfMask != NULL);
 
     // Allocate the interface structure itself.
-    intf = (PosixNetworkInterface*)calloc(1, sizeof(*intf));
+    intf = (PosixNetworkInterface*)mdns_calloc(1, sizeof(*intf));
     if (intf == NULL) { assert(0); err = ENOMEM; }
 
     // And make a copy of the intfName.
@@ -1216,7 +1217,7 @@ mDNSlocal int SetupOneInterface(mDNS *const m, struct sockaddr *intfAddr, struct
         memcpy(intf->intfName, intfName, len - 1);
         intfName[len - 1] = 0;
 #else
-        intf->intfName = strdup(intfName);
+        intf->intfName = mdns_strdup(intfName);
         if (intf->intfName == NULL) { assert(0); err = ENOMEM; }
 #endif
     }
@@ -1228,7 +1229,7 @@ mDNSlocal int SetupOneInterface(mDNS *const m, struct sockaddr *intfAddr, struct
         SockAddrTomDNSAddr(intfMask, &intf->coreIntf.mask, NULL);
 
         //LogMsg("SetupOneInterface: %#a %#a",  &intf->coreIntf.ip,  &intf->coreIntf.mask);
-        strncpy(intf->coreIntf.ifname, intfName, sizeof(intf->coreIntf.ifname));
+        mDNSPlatformStrLCopy(intf->coreIntf.ifname, intfName, sizeof(intf->coreIntf.ifname));
         intf->coreIntf.ifname[sizeof(intf->coreIntf.ifname)-1] = 0;
 
         intf->coreIntf.Advertise = m->AdvertiseLocalAddresses;
@@ -1372,7 +1373,7 @@ mDNSlocal int SetupInterfaceList(mDNS *const m)
     {
         PosixNetworkInterface *pi = *ri;
         if (utc - pi->LastSeen < 60) ri = (PosixNetworkInterface **)&pi->coreIntf.next;
-        else { *ri = (PosixNetworkInterface *)pi->coreIntf.next; free(pi); }
+        else { *ri = (PosixNetworkInterface *)pi->coreIntf.next; mdns_free(pi); }
     }
 
     return err;
@@ -2202,7 +2203,7 @@ mDNSlocal mStatus stopReadOrWriteEvents(int fd, mDNSBool freeContext, mDNSBool r
                 if (removeContext || freeContext)
                     *epp = iSource->next;
                 if (freeContext)
-                    free(iSource);
+                    mdns_free(iSource);
             }
             return mStatus_NoError;
         }
@@ -2218,7 +2219,7 @@ mStatus mDNSPosixAddFDToEventLoop(int fd, mDNSPosixEventCallback callback, void 
 {
     PosixEventSource *newSource;
 
-    newSource = (PosixEventSource*) malloc(sizeof *newSource);
+    newSource = (PosixEventSource*) mdns_malloc(sizeof *newSource);
     if (NULL == newSource)
         return mStatus_NoMemoryErr;
     memset(newSource, 0, sizeof *newSource);

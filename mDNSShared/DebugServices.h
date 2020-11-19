@@ -1103,7 +1103,7 @@ typedef uint32_t DebugPropertyTag;
 // without asserting, the DEBUG_EXPECT_VERIFIED conditional can be set to eliminate the error checking entirely. It can
 // also be useful to measure the cost of error checking code by profiling with it enable and with it disabled.
 
-#if ( DEBUG_EXPECT_VERIFIED )
+#if ( defined(DEBUG_EXPECT_VERIFIED) && DEBUG_EXPECT_VERIFIED )
     #define require_expect
     #define require_string_expect
     #define require_quiet_expect

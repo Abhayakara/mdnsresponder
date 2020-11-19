@@ -188,3 +188,6 @@
 (with-filter (system-attribute apple-internal)
     (allow file-read* file-map-executable
                (subpath "/usr/appleinternal/lib/sanitizers/")))
+
+(allow sysctl-write
+    (sysctl-name "net.inet.tcp.info"))

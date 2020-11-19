@@ -23,6 +23,7 @@
 #include <CoreUtils/CoreUtils.h>
 #include <os/object_private.h>
 #include <xpc/private.h>
+#include "mdns_strict.h"
 
 //======================================================================================================================
 // MARK: - Kind Declarations
@@ -442,9 +443,7 @@ void
 dnssd_getaddrinfo_set_result_handler(dnssd_getaddrinfo_t me, dnssd_getaddrinfo_result_handler_t handler)
 {
 	dnssd_getaddrinfo_result_handler_t const new_handler = handler ? Block_copy(handler) : NULL;
-	if (me->result_handler) {
-		Block_release(me->result_handler);
-	}
+	BlockForget(&me->result_handler);
 	me->result_handler = new_handler;
 }
 
@@ -454,9 +453,7 @@ void
 dnssd_getaddrinfo_set_event_handler(dnssd_getaddrinfo_t me, dnssd_event_handler_t handler)
 {
 	dnssd_event_handler_t const new_handler = handler ? Block_copy(handler) : NULL;
-	if (me->event_handler) {
-		Block_release(me->event_handler);
-	}
+	BlockForget(&me->event_handler);
 	me->event_handler = new_handler;
 }
 
@@ -529,7 +526,7 @@ _dnssd_client_invalidate_getaddrinfo(dnssd_getaddrinfo_t gai)
 
 	_dnssd_client_deregister_getaddrinfo(gai);
 	if ((gai->state == dnssd_getaddrinfo_state_starting) || (gai->state == dnssd_getaddrinfo_state_started)) {
-		xpc_object_t const msg = xpc_dictionary_create(NULL, NULL, 0);
+		xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
 		if (msg) {
 			dnssd_xpc_message_set_id(msg, gai->command_id);
 			dnssd_xpc_message_set_command(msg, DNSSD_COMMAND_STOP);
@@ -538,7 +535,7 @@ _dnssd_client_invalidate_getaddrinfo(dnssd_getaddrinfo_t gai)
 			{
 				(void)reply;
 			});
-			xpc_release(msg);
+			xpc_forget(&msg);
 		}
 	}
 	_dnssd_getaddrinfo_invalidate(gai);
@@ -601,7 +598,7 @@ _dnssd_getaddrinfo_copy_description(dnssd_getaddrinfo_t me, const bool debug, co
 
 		if (!buf_ptr) {
 			buf_len = desc_len + 1;
-			buf_ptr = malloc(buf_len);
+			buf_ptr = (char *)mdns_malloc(buf_len);
 			require_quiet(buf_ptr, exit);
 			buf_ptr[0] = '\0';
 		} else {
@@ -706,7 +703,8 @@ dnssd_getaddrinfo_result_get_type(dnssd_getaddrinfo_result_t me)
 const char *
 dnssd_getaddrinfo_result_get_actual_hostname(dnssd_getaddrinfo_result_t me)
 {
-	return xpc_string_get_string_ptr(me->actual_hostname);
+	const char * const tmp = xpc_string_get_string_ptr(me->actual_hostname);
+	return tmp;
 }
 
 //======================================================================================================================
@@ -722,7 +720,8 @@ dnssd_getaddrinfo_result_get_address(dnssd_getaddrinfo_result_t me)
 const char *
 dnssd_getaddrinfo_result_get_hostname(dnssd_getaddrinfo_result_t me)
 {
-	return xpc_string_get_string_ptr(me->hostname);
+	const char * const tmp = xpc_string_get_string_ptr(me->hostname);
+	return tmp;
 }
 
 //======================================================================================================================
@@ -942,7 +941,7 @@ _dnssd_getaddrinfo_result_copy_description(dnssd_getaddrinfo_result_t me, const 
 
 		if (!buf_ptr) {
 			buf_len = desc_len + 1;
-			buf_ptr = malloc(buf_len);
+			buf_ptr = (char *)mdns_malloc(buf_len);
 			require_quiet(buf_ptr, exit);
 			buf_ptr[0] = '\0';
 		} else {
@@ -1118,7 +1117,7 @@ _dnssd_cname_array_copy_description(const dnssd_cname_array_t me, const bool deb
 
 		if (!buf_ptr) {
 			buf_len = desc_len + 1;
-			buf_ptr = malloc(buf_len);
+			buf_ptr = (char *)mdns_malloc(buf_len);
 			require_quiet(buf_ptr, exit);
 			buf_ptr[0] = '\0';
 		} else {
@@ -1428,7 +1427,7 @@ static OSStatus
 _dnssd_client_send_getaddrinfo_command(dnssd_getaddrinfo_t gai)
 {
 	OSStatus err;
-	xpc_object_t const msg = xpc_dictionary_create(NULL, NULL, 0);
+	xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
 	require_action_quiet(msg, exit, err = kNoResourcesErr);
 
 	dnssd_xpc_message_set_id(msg, gai->command_id);
@@ -1442,7 +1441,7 @@ _dnssd_client_send_getaddrinfo_command(dnssd_getaddrinfo_t gai)
 		_dnssd_client_handle_getaddrinfo_reply(gai, reply);
 		dnssd_release(gai);
 	});
-	xpc_release(msg);
+	xpc_forget(&msg);
 	err = kNoErr;
 
 exit:
@@ -1646,13 +1645,14 @@ _dnssd_getaddrinfo_result_create(const dnssd_getaddrinfo_result_type_t type, con
 	dnssd_getaddrinfo_result_t obj = _dnssd_getaddrinfo_result_alloc();
 	require_action_quiet(obj, exit, err = kNoMemoryErr);
 
-	switch (type) {
+	switch ((int)type) {
 		case dnssd_getaddrinfo_result_type_add:
 		case dnssd_getaddrinfo_result_type_remove:
 		case dnssd_getaddrinfo_result_type_no_address:
 		case dnssd_getaddrinfo_result_type_expired:
 			break;
 
+		case dnssd_getaddrinfo_result_type_service_binding:
 		default:
 			err = kTypeErr;
 			goto exit;
@@ -1751,14 +1751,14 @@ _dnssd_getaddrinfo_result_create_svcb(xpc_object_t hostname, xpc_object_t actual
 			} else {
 				obj->service_name = xpc_string_create(service_name);
 			}
-			free(service_name);
+			ForgetMem(&service_name);
 			require_action_quiet(obj->service_name, exit, err = kNoResourcesErr);
 		}
 
 		char *doh_uri = dnssd_svcb_copy_doh_uri(svcb_data, svcb_length);
 		if (doh_uri != NULL) {
 			obj->doh_uri = xpc_string_create(doh_uri);
-			free(doh_uri);
+			ForgetMem(&doh_uri);
 			require_action_quiet(obj->doh_uri, exit, err = kNoResourcesErr);
 		}
 
@@ -1766,7 +1766,7 @@ _dnssd_getaddrinfo_result_create_svcb(xpc_object_t hostname, xpc_object_t actual
 		uint8_t *ech_config = dnssd_svcb_copy_ech_config(svcb_data, svcb_length, &ech_config_length);
 		if (ech_config != NULL) {
 			obj->ech_config = xpc_data_create(ech_config, ech_config_length);
-			free(ech_config);
+			ForgetMem(&ech_config);
 			require_action_quiet(obj->ech_config, exit, err = kNoResourcesErr);
 		}
 
@@ -1776,7 +1776,7 @@ _dnssd_getaddrinfo_result_create_svcb(xpc_object_t hostname, xpc_object_t actual
 				obj->alpn_values = xpc_array_create(NULL, 0);
 			}
 			xpc_array_append_value(obj->alpn_values, alpn_string);
-			xpc_release(alpn_string);
+			xpc_forget(&alpn_string);
 			return true;
 		});
 
@@ -1786,7 +1786,7 @@ _dnssd_getaddrinfo_result_create_svcb(xpc_object_t hostname, xpc_object_t actual
 				obj->address_hints = xpc_array_create(NULL, 0);
 			}
 			xpc_array_append_value(obj->address_hints, address_hint);
-			xpc_release(address_hint);
+			xpc_forget(&address_hint);
 			return true;
 		});
 	} else {
@@ -1869,7 +1869,9 @@ _dnssd_snprintf(char ** const dst, const char * const end, const char * const fo
 	const size_t len = (size_t)(end - ptr);
 	va_list args;
 	va_start(args, format);
+	CUClangWarningIgnoreBegin(-Wformat-nonliteral);
 	const int n = vsnprintf(ptr, len, format, args);
+	CUClangWarningIgnoreEnd();
 	va_end(args);
 	if (n >= 0) {
 		*dst = ptr + Min((size_t)n, len);

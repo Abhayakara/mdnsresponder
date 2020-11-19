@@ -17,6 +17,7 @@
 
 #include "../mDNSMacOSX/DNSServiceDiscovery.h"
 #include "DNSServiceDiscoveryDefines.h"
+#include "mdns_strict.h"
 
 #include <stdlib.h>
 #include <stdio.h>

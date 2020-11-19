@@ -18,7 +18,7 @@
 #define __QUERIER_SUPPORT_H__
 
 #include "mDNSEmbeddedAPI.h"
-#include "mdns_private.h"
+#include <mdns/private.h>
 
 // Threshold value for problematic QTYPE workaround.
 extern int PQWorkaroundThreshold;

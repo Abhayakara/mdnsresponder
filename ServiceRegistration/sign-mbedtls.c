@@ -538,11 +538,13 @@ cleanup:
 #endif
 }
 
+#ifndef THREAD_DEVKIT_ADK
 int
 srp_reset_key(const char *key_name, void *UNUSED os_context)
 {
     return srp_remove_key_file(os_context, key_name);
 }
+#endif
 
 // Local Variables:
 // mode: C

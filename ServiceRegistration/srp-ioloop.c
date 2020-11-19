@@ -38,6 +38,7 @@ static int lease_time = 0;
 static bool random_leases = false;
 static bool delete_registrations = false;
 static bool use_thread_services = false;
+static bool change_txt_record = false;
 static int num_clients = 1;
 static int bogusify_signatures = false;
 
@@ -62,6 +63,7 @@ typedef struct srp_client {
     int index;
     wakeup_t *wakeup;
     char *name;
+    bool updated_txt_record;
 } srp_client_t;
 
 static int
@@ -107,6 +109,10 @@ srp_deactivate_udp_context(void *host_context, void *in_context)
 
     err = validate_io_context(&io_context, in_context);
     if (err == kDNSServiceErr_NoError) {
+        if (io_context->wakeup != NULL) {
+            ioloop_cancel_wake_event(io_context->wakeup);
+            ioloop_wakeup_release(io_context->wakeup);
+        }
         if (io_context->connection) {
             ioloop_comm_release(io_context->connection);
         }
@@ -352,18 +358,35 @@ remove_callback(void *context)
 }
 
 static void
-register_callback(DNSServiceRef sdRef, DNSServiceFlags flags, DNSServiceErrorType errorCode,
+register_callback(DNSServiceRef sdref, DNSServiceFlags flags, DNSServiceErrorType errorCode,
                   const char *name, const char *regtype, const char *domain, void *context)
 {
     srp_client_t *client = context;
 
-    (void)sdRef;
     (void)regtype;
     (void)flags;
     (void)name;
     (void)regtype;
     (void)domain;
     INFO("Register Reply for %s: %d", client->name, errorCode);
+
+    if (errorCode == kDNSServiceErr_NoError && change_txt_record && !client->updated_txt_record) {
+        TXTRecordRef txt;
+        const void *txt_data = NULL;
+        uint16_t txt_len = 0;
+        char txt_buf[128];
+
+        TXTRecordCreate(&txt, sizeof(txt_buf), txt_buf);
+        TXTRecordSetValue(&txt, "foo", 1, "1");
+        TXTRecordSetValue(&txt, "bar", 3, "1.1");
+        txt_data = TXTRecordGetBytesPtr(&txt);
+        txt_len = TXTRecordGetLength(&txt);
+
+        (void)DNSServiceUpdateRecord(sdref, NULL, 0, txt_len, txt_data, 0);
+        client->updated_txt_record = true;
+        srp_network_state_stable(NULL);
+        return;
+    }
 
     if (errorCode == kDNSServiceErr_NoError && delete_registrations) {
         client->wakeup = ioloop_wakeup_create();
@@ -489,6 +512,8 @@ main(int argc, char **argv)
             use_thread_services = true;
         } else if (!strcmp(argv[i], "--log-stderr")) {
             OPENLOG(true);
+        } else if (!strcmp(argv[i], "--change-txt-record")) {
+            change_txt_record = true;
         } else if (!strcmp(argv[i], "--bogusify-signatures")) {
             bogusify_signatures = true;
         } else {
@@ -510,6 +535,10 @@ main(int argc, char **argv)
     for (i = 0; i < num_clients; i++) {
         srp_client_t *client;
         char hnbuf[128];
+        TXTRecordRef txt;
+        const void *txt_data = NULL;
+        uint16_t txt_len = 0;
+        char txt_buf[128];
 
         client = calloc(1, sizeof(*client));
         if (client == NULL) {
@@ -540,9 +569,16 @@ main(int argc, char **argv)
             srp_set_lease_times(lease_time, 7 * 24 * 3600); // specified host lease, 7 day key lease
         }
 
+        if (change_txt_record) {
+            TXTRecordCreate(&txt, sizeof(txt_buf), txt_buf);
+            TXTRecordSetValue(&txt, "foo", 1, "0");
+            TXTRecordSetValue(&txt, "bar", 3, "1.1");
+            txt_data = TXTRecordGetBytesPtr(&txt);
+            txt_len = TXTRecordGetLength(&txt);
+        }
         memcpy(&iport, port, 2);
         err = DNSServiceRegister(&sdref, 0, 0, hnbuf, "_ipps._tcp",
-                                 NULL, NULL, iport, 0, NULL, register_callback, client);
+                                 0, 0, iport, txt_len, txt_data, register_callback, client);
         if (err != kDNSServiceErr_NoError) {
             ERROR("DNSServiceRegister failed: %d", err);
             exit(1);

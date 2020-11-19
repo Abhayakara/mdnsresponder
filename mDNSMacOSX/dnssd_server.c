@@ -20,7 +20,7 @@
 #include "dnssd_xpc.h"
 #include "dnssd_svcb.h"
 #include "dnssd_private.h"
-#include "mdns_helpers.h"
+#include <mdns/ticks.h>
 #include "mDNSMacOSX.h"
 
 #include <bsm/libbsm.h>
@@ -42,6 +42,8 @@
 #include "mdns_trust.h"
 #include <os/feature_private.h>
 #endif
+
+#include "mdns_strict.h"
 
 //======================================================================================================================
 // MARK: - Kind Declarations
@@ -70,23 +72,24 @@
 	};														\
 	DX_BASE_CHECK(NAME, SUPER)
 
-#define DX_SUBKIND_DEFINE(NAME, SUPER, ...)											\
-	DX_SUBKIND_DEFINE_ABSTRACT(NAME, SUPER, __VA_ARGS__);							\
-																					\
-	static dx_ ## NAME ## _t														\
-	_dx_ ## NAME ## _alloc_and_init(void)											\
-	{																				\
-		const dx_ ## NAME ## _t obj = (dx_ ## NAME ## _t)calloc(1, sizeof(*obj));	\
-		require_quiet(obj, exit);													\
-																					\
-		const dx_object_t object = (dx_object_t)obj;								\
-		object->ref_count	= 1;													\
-		object->kind		= &_dx_ ## NAME ## _kind;								\
-		_dx_init(object);															\
-																					\
-	exit:																			\
-		return obj;																	\
-	}
+#define DX_SUBKIND_DEFINE(NAME, SUPER, ...)												\
+	DX_SUBKIND_DEFINE_ABSTRACT(NAME, SUPER, __VA_ARGS__);								\
+																						\
+	static dx_ ## NAME ## _t															\
+	_dx_ ## NAME ## _alloc_and_init(void)												\
+	{																					\
+		const dx_ ## NAME ## _t obj = (dx_ ## NAME ## _t)mdns_calloc(1, sizeof(*obj));	\
+		require_quiet(obj, exit);														\
+																						\
+		const dx_object_t object = (dx_object_t)obj;									\
+		atomic_store_explicit(&object->ref_count, 1, memory_order_relaxed);				\
+		object->kind = &_dx_ ## NAME ## _kind;											\
+		_dx_init(object);																\
+																						\
+	exit:																				\
+		return obj;																		\
+	}																					\
+	extern int _dx_dummy_variable
 
 #define DX_OBJECT_SUBKIND_DEFINE_ABSTRACT(NAME, ...)	DX_SUBKIND_DEFINE_ABSTRACT(NAME, object, __VA_ARGS__)
 #define DX_OBJECT_SUBKIND_DEFINE(NAME, ...)				DX_SUBKIND_DEFINE(NAME, object, __VA_ARGS__)
@@ -600,10 +603,10 @@ _dx_finalize(dx_object_t object);
 static void
 _dx_release(const dx_any_t any)
 {
-	const dx_object_t me = any.object;
+	dx_object_t me = any.object;
 	if (atomic_fetch_sub(&me->ref_count, 1) == 1) {
 		_dx_finalize(me);
-		free(me);
+		ForgetMem(&me);
 	}
 }
 
@@ -1160,7 +1163,9 @@ _dx_gai_request_trust_check(const dx_gai_request_t me, bool * const out_defer_ac
 			err = kDNSServiceErr_NoAuth;
 			break;
 
+		CUClangWarningIgnoreBegin(-Wcovered-switch-default);
 		default:
+		CUClangWarningIgnoreEnd();
 			err = kDNSServiceErr_Unknown;
 			break;
 	}
@@ -1480,13 +1485,13 @@ _dx_gai_request_query_result_handler(mDNS * const m, DNSQuestion * const q, cons
 			_dx_gai_request_log_svcb_result(me, query_id, if_index, answer->name, type_str, rdata_ptr, rdata_len,
 				answer, add_result);
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
-			char * const svcb_doh_uri = dnssd_svcb_copy_doh_uri(rdata_ptr, rdata_len);
+			char *svcb_doh_uri = dnssd_svcb_copy_doh_uri(rdata_ptr, rdata_len);
 			// Check for a valid DoH URI.
 			if (svcb_doh_uri) {
 				// Pass the domain to map if the record is DNSSEC signed.
 				char *svcb_domain = NULL;
 				Querier_RegisterDoHURI(svcb_doh_uri, svcb_domain);
-				free(svcb_doh_uri);
+				ForgetMem(&svcb_doh_uri);
 			}
 #endif
 		} else {

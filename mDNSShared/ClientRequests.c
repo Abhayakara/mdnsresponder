@@ -18,6 +18,7 @@
 
 #include "DNSCommon.h"
 #include "uDNS.h"
+#include "mdns_strict.h"
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 #include "QuerierSupport.h"
@@ -29,6 +30,11 @@
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, REACHABILITY_TRIGGER)
 #include "mDNSMacOSX.h"
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, RESOLVED_SYMPTOM)
+#include "resolved_cache.h"
+#include <os/feature_private.h>
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, UNREADY_INTERFACES)
@@ -707,6 +713,41 @@ mDNSlocal void QueryRecordOpCallback(mDNS *m, DNSQuestion *inQuestion, const Res
     }
 #endif
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, RESOLVED_SYMPTOM)
+    if (os_feature_enabled(symptomsd, networking_transparency)  &&
+        inAddRecord                                             &&
+        !mDNSOpaque16IsZero(inQuestion->TargetQID)              &&
+        !LocalOnlyOrP2PInterface(inAnswer->InterfaceID)         &&
+        inAnswer->RecordType != kDNSRecordTypePacketNegative    &&
+        ((inAnswer->rrtype == kDNSServiceType_CNAME)    ||
+         (inAnswer->rrtype == kDNSServiceType_A)        ||
+         (inAnswer->rrtype == kDNSServiceType_AAAA)))
+    {
+        if (inQuestion->CNAMEReferrals == 0)
+        {
+            resolved_cache_append_name((uintptr_t)inQuestion, inAnswer->name);
+        }
+
+        if (inAnswer->rrtype == kDNSServiceType_CNAME)
+        {
+            resolved_cache_append_name((uintptr_t)inQuestion, &inAnswer->rdata->u.name);
+        }
+        else
+        {
+            const void *data_ptr;
+            if (inAnswer->rrtype == kDNSServiceType_A)
+            {
+                data_ptr = inAnswer->rdata->u.ipv4.b;
+            }
+            else if (inAnswer->rrtype == kDNSServiceType_AAAA)
+            {
+                data_ptr = inAnswer->rdata->u.ipv6.b;
+            }
+            resolved_cache_append_address((uintptr_t)inQuestion, inAnswer->rrtype, data_ptr);
+        }
+    }
+#endif
+
     if (op->resultHandler) op->resultHandler(m, inQuestion, inAnswer, inAddRecord, resultErr, op->resultContext);
     if (resultErr == kDNSServiceErr_Timeout) QueryRecordOpStopQuestion(inQuestion);
 
@@ -754,6 +795,12 @@ mDNSlocal mStatus QueryRecordOpStopQuestion(DNSQuestion *inQuestion)
 {
     mStatus     err;
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, RESOLVED_SYMPTOM)
+    if (os_feature_enabled(symptomsd, networking_transparency))
+    {
+        resolved_cache_delete((uintptr_t)inQuestion);
+    }
+#endif
     err = mDNS_StopQuery(&mDNSStorage, inQuestion);
     inQuestion->QuestionContext = mDNSNULL;
     return err;

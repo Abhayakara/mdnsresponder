@@ -98,7 +98,7 @@
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
-#include "mdns_private.h"
+#include <mdns/private.h>
 #endif
 
 #ifdef __cplusplus
@@ -785,7 +785,7 @@ typedef enum
 
 typedef packedstruct { mDNSu16 priority; mDNSu16 weight; mDNSIPPort port; domainname target;   } rdataSRV;
 typedef packedstruct { mDNSu16 preference;                                domainname exchange; } rdataMX;
-typedef packedstruct { domainname mbox; domainname txt;                                        } rdataRP;
+typedef       struct { domainname mbox; domainname txt;                                        } rdataRP;
 typedef packedstruct { mDNSu16 preference; domainname map822; domainname mapx400;              } rdataPX;
 
 typedef packedstruct
@@ -1011,7 +1011,7 @@ enum
 
 typedef mDNSu16 NATErr_t;
 
-typedef packedstruct
+typedef struct // packedstruct unnecessary
 {
     mDNSu8 vers;
     mDNSu8 opcode;
@@ -1293,7 +1293,7 @@ struct ResourceRecord_struct
                                         // For records received off the wire, InterfaceID is *always* set to the receiving interface
                                         // For our authoritative records, InterfaceID is usually zero, except for those few records
                                         // that are interface-specific (e.g. address records, especially linklocal addresses)
-    const domainname *name;
+    domainname      *name;
     RData           *rdata;             // Pointer to storage for this rdata
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 	mdns_dns_service_t dnsservice;
@@ -1426,7 +1426,7 @@ struct AuthRecord_struct
     mDNSu8 ImmedUnicast;                // Set if we may send our response directly via unicast to the requester
     mDNSInterfaceID SendNSECNow;        // Set if we need to generate associated NSEC data for this rrname
     mDNSInterfaceID ImmedAnswer;        // Someone on this interface issued a query we need to answer (all-ones for all interfaces)
-#if MDNS_LOG_ANSWER_SUPPRESSION_TIMES
+#if defined(MDNS_LOG_ANSWER_SUPPRESSION_TIMES) && MDNS_LOG_ANSWER_SUPPRESSION_TIMES
     mDNSs32 ImmedAnswerMarkTime;
 #endif
     mDNSInterfaceID ImmedAdditional;    // Hint that we might want to also send this record, just to be helpful
@@ -1658,6 +1658,7 @@ typedef struct
 
 typedef enum
 {
+    LLQ_Invalid = 0,
     // This is the initial state.
     LLQ_Init = 1,
 
@@ -2457,6 +2458,11 @@ mDNSinline mDNSOpaque16 mDNSOpaque16fromIntVal(mDNSu16 v)
     return(x);
 }
 
+mDNSinline mDNSu32 mDNSVal32(mDNSOpaque32 x)
+{
+    return((mDNSu32)((((mDNSu32)x.b[0]) << 24) | (((mDNSu32)x.b[1]) << 16) | (((mDNSu32)x.b[2]) << 8) | (mDNSu32)x.b[3]));
+}
+
 #endif
     
 // ***************************************************************************
@@ -2700,6 +2706,8 @@ extern const mDNSu8 *LastLabel(const domainname *d);
 //   (e.g. length of "com." is 5 (length byte, three data bytes, final zero)
 extern mDNSu16  DomainNameLengthLimit(const domainname *const name, const mDNSu8 *limit);
 #define DomainNameLength(name) DomainNameLengthLimit((name), (name)->c + MAX_DOMAIN_NAME)
+
+extern mDNSu8 DomainLabelLength(const domainlabel *const label);
 
 // Append functions to append one or more labels to an existing native format domain name:
 //   AppendLiteralLabelString adds a single label from a literal C string, with no escape character interpretation.
@@ -3153,7 +3161,9 @@ typedef enum
 {
     FastActivation,     // For p2p* and DirectLink type interfaces
     NormalActivation,   // For standard interface timing
+#if MDNSRESPONDER_SUPPORTS(APPLE, SLOW_ACTIVATION)
     SlowActivation      // For flapping interfaces
+#endif
 } InterfaceActivationSpeed;
 
 extern mStatus  mDNS_RegisterInterface  (mDNS *const m, NetworkInterfaceInfo *set, InterfaceActivationSpeed probeDelay);

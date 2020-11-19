@@ -66,7 +66,7 @@
  */
 
 #ifndef _DNS_SD_H
-#define _DNS_SD_H 13600000
+#define _DNS_SD_H 13800000
 
 #ifdef  __cplusplus
 extern "C" {
@@ -543,27 +543,28 @@ enum
      */
 
 
-    kDNSServiceFlagAnsweredFromCache     = 0x40000000,
+    kDNSServiceFlagAnsweredFromCache     = 0x40000000
     /*
      * When kDNSServiceFlagAnsweredFromCache is passed back in the flags parameter of DNSServiceQueryRecordReply or DNSServiceGetAddrInfoReply,
      * an answer will have this flag set if it was answered from the cache.
      */
 
-    kDNSServiceFlagsAllowExpiredAnswers   = 0x80000000,
-    /*
-     * When kDNSServiceFlagsAllowExpiredAnswers is passed to DNSServiceQueryRecord or DNSServiceGetAddrInfo,
-     * if there are matching expired records still in the cache, then they are immediately returned to the
-     * client, and in parallel a network query for that name is issued. All returned records from the query will
-     * remain in the cache after expiration.
-     */
-    
-    kDNSServiceFlagsExpiredAnswer         = 0x80000000
-    /*
-     * When kDNSServiceFlagsAllowExpiredAnswers is passed to DNSServiceQueryRecord or DNSServiceGetAddrInfo,
-     * an expired answer will have this flag set.
-     */
-
 };
+
+#define kDNSServiceFlagsAllowExpiredAnswers     0x80000000
+/*
+ * When kDNSServiceFlagsAllowExpiredAnswers is passed to DNSServiceQueryRecord or DNSServiceGetAddrInfo,
+ * if there are matching expired records still in the cache, then they are immediately returned to the
+ * client, and in parallel a network query for that name is issued. All returned records from the query will
+ * remain in the cache after expiration.
+ */
+
+#define kDNSServiceFlagsExpiredAnswer           0x80000000
+/*
+ * When kDNSServiceFlagsAllowExpiredAnswers is passed to DNSServiceQueryRecord or DNSServiceGetAddrInfo,
+ * an expired answer will have this flag set.
+ */
+
 
 /* Possible protocol values */
 enum

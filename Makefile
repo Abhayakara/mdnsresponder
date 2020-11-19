@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2003-2018 Apple Inc. All rights reserved.
+# Copyright (c) 2003-2020 Apple Inc. All rights reserved.
 #
 # Top level makefile for Build & Integration (B&I).
 # 
@@ -17,16 +17,13 @@
 
 include $(MAKEFILEPATH)/pb_makefiles/platform.make
 
-MVERS = "mDNSResponder-1360"
+MVERS = "mDNSResponder-1380"
 
-VER =
-ifneq ($(strip $(GCC_VERSION)),)
-	VER = -- GCC_VERSION=$(GCC_VERSION)
+projectdir		:= $(SRCROOT)/mDNSMacOSX
+buildsettings	:= OBJROOT='$(OBJROOT)' SYMROOT='$(SYMROOT)' DSTROOT='$(DSTROOT)' MVERS=$(MVERS) SDKROOT='$(SDKROOT)'
+ifdef GCC_VERSION
+buildsettings	+= GCC_VERSION=$(GCC_VERSION)
 endif
-echo "VER = $(VER)"
-
-projectdir	:= $(SRCROOT)/mDNSMacOSX
-buildsettings	:= OBJROOT=$(OBJROOT) SYMROOT=$(SYMROOT) DSTROOT=$(DSTROOT) MVERS=$(MVERS) SDKROOT=$(SDKROOT)
 
 .PHONY: install installSome installEmpty installExtras SystemLibraries installhdrs installapi installsrc java clean
 
@@ -68,9 +65,9 @@ endif
 #
 #	Platform	Make Target
 #	--------	-----------
-#	osx		install
-#	ios		installSome
-#	atv		installSome
+#	osx			install
+#	ios			installSome
+#	atv			installSome
 #	watch		installSome
 #
 # For the mDNSResponderSystemLibraries and mDNSResponderSystemLibraries_sim build aliases, B&I uses the SystemLibraries
@@ -78,65 +75,71 @@ endif
 
 install:
 ifeq ($(RC_ProjectName), mDNSResponderServices)
-ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), osx)
-	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Services-macOS' $(VER)
-else
-	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Services' $(VER)
-endif
+  ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), osx)
+	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Services-macOS'
+  else
+	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Services'
+  endif
 else ifeq ($(RC_ProjectName), mDNSResponderServices_Sim)
-	mkdir -p $(DSTROOT)/AppleInternal
+	mkdir -p '$(DSTROOT)/AppleInternal'
+else ifeq ($(RC_ProjectName), libmdns)
+	mkdir -p '$(DSTROOT)/AppleInternal'
 else
-	cd '$(projectdir)'; xcodebuild install $(buildsettings) $(VER)
+	cd '$(projectdir)'; xcodebuild install $(buildsettings)
 endif
 
 installSome:
-	cd '$(projectdir)'; xcodebuild install $(buildsettings) $(VER)
+	cd '$(projectdir)'; xcodebuild install $(buildsettings)
 
 installEmpty:
-	mkdir -p $(DSTROOT)/AppleInternal
+	mkdir -p '$(DSTROOT)/AppleInternal'
 
 installExtras:
 ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), osx)
-	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras-macOS' $(VER)
+	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras-macOS'
 else ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), ios)
-	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras-iOS' $(VER)
+	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras-iOS'
 else ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), atv)
-	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras-tvOS' $(VER)
+	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras-tvOS'
 else
-	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras' $(VER)
+	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras'
 endif
 
 SystemLibraries:
-	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target SystemLibraries $(VER)
+	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target SystemLibraries
 
 # B&I installhdrs build targets
 
 installhdrs::
 ifeq ($(RC_ProjectName), mDNSResponderServices)
-ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), osx)
-	cd '$(projectdir)'; xcodebuild installhdrs $(buildsettings) -target 'Build Services-macOS' $(VER)
-else
-	cd '$(projectdir)'; xcodebuild installhdrs $(buildsettings) -target 'Build Services' $(VER)
-endif
+  ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), osx)
+	cd '$(projectdir)'; xcodebuild installhdrs $(buildsettings) -target 'Build Services-macOS'
+  else
+	cd '$(projectdir)'; xcodebuild installhdrs $(buildsettings) -target 'Build Services'
+  endif
 else ifeq ($(RC_ProjectName), mDNSResponderServices_Sim)
-	mkdir -p $(DSTROOT)/AppleInternal
+	mkdir -p '$(DSTROOT)/AppleInternal'
+else ifeq ($(RC_ProjectName), libmdns)
+	mkdir -p '$(DSTROOT)/AppleInternal'
 else ifneq ($(findstring SystemLibraries,$(RC_ProjectName)),)
-	cd '$(projectdir)'; xcodebuild installhdrs $(buildsettings) -target SystemLibraries $(VER)
+	cd '$(projectdir)'; xcodebuild installhdrs $(buildsettings) -target SystemLibraries
 endif
 
 # B&I installapi build targets
 
 installapi:
 ifeq ($(RC_ProjectName), mDNSResponderServices)
-ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), osx)
-	cd '$(projectdir)'; xcodebuild installapi $(buildsettings) -target 'Build Services-macOS' $(VER)
-else
-	cd '$(projectdir)'; xcodebuild installapi $(buildsettings) -target 'Build Services' $(VER)
-endif
+  ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), osx)
+	cd '$(projectdir)'; xcodebuild installapi $(buildsettings) -target 'Build Services-macOS'
+  else
+	cd '$(projectdir)'; xcodebuild installapi $(buildsettings) -target 'Build Services'
+  endif
 else ifeq ($(RC_ProjectName), mDNSResponderServices_Sim)
-	mkdir -p $(DSTROOT)/AppleInternal
+	mkdir -p '$(DSTROOT)/AppleInternal'
+else ifeq ($(RC_ProjectName), libmdns)
+	mkdir -p '$(DSTROOT)/AppleInternal'
 else ifneq ($(findstring SystemLibraries,$(RC_ProjectName)),)
-	cd '$(projectdir)'; xcodebuild installapi $(buildsettings) -target SystemLibrariesDynamic $(VER)
+	cd '$(projectdir)'; xcodebuild installapi $(buildsettings) -target SystemLibrariesDynamic
 endif
 
 # Misc. targets
@@ -146,7 +149,7 @@ installsrc:
 	rm -rf '$(SRCROOT)/mDNSWindows' '$(SRCROOT)/Clients/FirefoxExtension'
 
 java:
-	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target libjdns_sd.jnilib $(VER)
+	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target libjdns_sd.jnilib
 
 clean::
 	echo clean

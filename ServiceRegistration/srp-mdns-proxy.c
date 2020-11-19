@@ -28,7 +28,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <sys/time.h>
+#include <time.h>
 #include <dns_sd.h>
 #include <net/if.h>
 #include <inttypes.h>
@@ -59,6 +59,7 @@ int advertise_interface = kDNSServiceInterfaceIndexAny;
 const char local_suffix_ld[] = ".local";
 const char *local_suffix = &local_suffix_ld[1];
 uint32_t max_lease_time = 3600 * 27; // One day plus 20%
+uint32_t min_lease_time = 30; // thirty seconds
 
 // Forward references...
 static void try_new_hostname(adv_host_t *host);
@@ -228,21 +229,6 @@ advertise_finished(comm_t *connection, message_t *message, int rcode, client_upd
         iov.iov_len = DNS_HEADER_SIZE;
     }
     ioloop_send_message(connection, message, &iov, 1);
-}
-
-static void
-host_txn_finalize_callback(void *context)
-{
-    adv_host_t *host = context;
-    host->txn = NULL;
-    host->rref = NULL;
-}
-
-static void
-instance_txn_finalize_callback(void *context)
-{
-    adv_instance_t *instance = context;
-    instance->txn = NULL;
 }
 
 static void
@@ -914,7 +900,7 @@ register_instance(adv_instance_t *instance)
         }
         return false;
     }
-    instance->txn = ioloop_dnssd_txn_add(sdref, instance, instance_txn_finalize_callback, NULL);
+    instance->txn = ioloop_dnssd_txn_add(sdref, instance, NULL, NULL);
     if (instance->txn == NULL) {
         ERROR("register_instance: no memory.");
         DNSServiceRefDeallocate(sdref);
@@ -961,6 +947,7 @@ start_service_updates(adv_host_t *host)
     for (i = 0; i < host->instances->num; i++) {
         if (update->update_instances->vec[i] != NULL || update->remove_instances->vec[i] != NULL) {
             if (host->instances->vec[i]->txn != NULL) {
+                ioloop_dnssd_txn_cancel(host->instances->vec[i]->txn);
                 ioloop_dnssd_txn_release(host->instances->vec[i]->txn);
                 host->instances->vec[i]->txn = NULL;
             }
@@ -1388,6 +1375,7 @@ start_host_update(adv_host_t *host)
     // of the same type.   We can't use that, so we just remove the record (if it exists) and then add
     // the intended record.
     if (remove_preexisting && host->txn != NULL) {
+        ioloop_dnssd_txn_cancel(host->txn);
         ioloop_dnssd_txn_release(host->txn);
         host->txn = NULL;
     }
@@ -1413,7 +1401,7 @@ start_host_update(adv_host_t *host)
             return;
         }
         INFO("Adding transaction %p", sdref);
-        host->txn = ioloop_dnssd_txn_add(sdref, host, host_txn_finalize_callback, NULL);
+        host->txn = ioloop_dnssd_txn_add(sdref, host, NULL, NULL);
         if (host->txn == NULL) {
             ERROR("start_host_update: no memory for host transaction");
             if (update->client != NULL) {
@@ -1989,7 +1977,11 @@ found_something:
     client_update->services = services;
     client_update->update_zone = update_zone;
     if (lease_time < max_lease_time) {
-        client_update->host_lease = lease_time;
+        if (lease_time < min_lease_time) {
+            client_update->host_lease = min_lease_time;
+        } else {
+            client_update->host_lease = lease_time;
+        }
     } else {
         client_update->host_lease = max_lease_time;
     }
@@ -2053,7 +2045,7 @@ srp_mdns_flush(void)
 static void
 usage(void)
 {
-    ERROR("srp-mdns-proxy [--max-lease-time <seconds>] [--log-stderr]");
+    ERROR("srp-mdns-proxy [--max-lease-time <seconds>] [--min-lease-time <seconds>] [--log-stderr]");
     exit(1);
 }
 
@@ -2070,6 +2062,15 @@ main(int argc, char **argv)
                 usage();
             }
             max_lease_time = (uint32_t)strtoul(argv[i + 1], &end, 10);
+            if (end == argv[i + 1] || end[0] != 0) {
+                usage();
+            }
+            i++;
+        } else if (!strcmp(argv[i], "--min-lease-time")) {
+            if (i + 1 == argc) {
+                usage();
+            }
+            min_lease_time = (uint32_t)strtoul(argv[i + 1], &end, 10);
             if (end == argv[i + 1] || end[0] != 0) {
                 usage();
             }

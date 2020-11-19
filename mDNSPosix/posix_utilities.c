@@ -7,6 +7,7 @@
 
 #include "posix_utilities.h"
 #include "mDNSEmbeddedAPI.h"
+#include "mdns_strict.h"
 #include <stdlib.h>                 // for NULL
 #include <stdio.h>                  // for snprintf
 #include <time.h>

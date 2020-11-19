@@ -648,13 +648,13 @@ interface_beacon(void *context)
     if (interface->deprecate_deadline > now) {
         // The remaining valid lifetime is the time left until the deadline.
         interface->valid_lifetime = (uint32_t)((interface->deprecate_deadline - now) / 1000);
-        if (interface->valid_lifetime < icmp_listener.unsolicited_interval) {
+        if (interface->valid_lifetime < icmp_listener.unsolicited_interval / 1000) {
             SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
             INFO("interface_beacon: prefix valid life time is less than the unsolicited interval, stop advertising it "
                  "and prepare to deconfigure the prefix - ifname: " PUB_S_SRP "prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP
                  ", preferred time: %" PRIu32 ", valid time: %" PRIu32 ", unsolicited interval: %" PRIu32,
                  interface->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf),
-                 interface->preferred_lifetime, interface->valid_lifetime, icmp_listener.unsolicited_interval);
+                 interface->preferred_lifetime, interface->valid_lifetime, icmp_listener.unsolicited_interval / 1000);
             interface->advertise_ipv6_prefix = false;
             ioloop_add_wake_event(interface->deconfigure_wakeup,
                                   interface, interface_prefix_deconfigure,
@@ -931,7 +931,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
         }
     }
 
-    INFO("policy on " PUB_S_SRP ": " PUB_S_SRP "stale " /* stale_routers_exist ? */
+    INFO("routing_policy_evaluate: policy on " PUB_S_SRP ": " PUB_S_SRP "stale " /* stale_routers_exist ? */
          PUB_S_SRP "disco " /* interface->router_discovery_complete ? */
          PUB_S_SRP "present " /* on_link_prefix_present ? */
          PUB_S_SRP "advert " /* interface->advertise_ipv6_prefix ? */
@@ -962,7 +962,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
             INFO("routing_policy_evaluate: deprecating interface prefix in 30 minutes - prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
             interface->preferred_lifetime = 0;
-            interface->deprecate_deadline = now + 1800 * 1000;
+            interface->deprecate_deadline = now + 30 * 60 * 1000;
             something_changed = true;
         } else {
             INFO("routing_policy_evaluate: prefix deprecating in progress - prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
@@ -985,7 +985,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
         interface->deprecate_deadline = 0;
 
         // Start advertising immediately, 30 minutes.
-        interface->preferred_lifetime = interface->valid_lifetime = 1800;
+        interface->preferred_lifetime = interface->valid_lifetime = 30 * 60;
 
         // If the on-link prefix isn't configured on the interface, do that.
         if (!interface->on_link_prefix_configured) {
@@ -1301,6 +1301,10 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
 #if   defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG)
     char *args[] = { "set", interface->name, "MANUAL-V6", addrbuf, "64" };
 
+    if (interface->link_route_adder_process != NULL) {
+        ERROR("interface_prefix_configure: " PUB_S_SRP " already configuring the route.", interface->name);
+        return;
+    }
     INFO("interface_prefix_configure: /sbin/ipconfig " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " "
          PUB_S_SRP, args[0], args[1], args[2], args[3], args[4]);
     interface->link_route_adder_process = ioloop_subproc("/usr/sbin/ipconfig", args, 5, link_route_done, interface, NULL);
@@ -1316,6 +1320,10 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
     strcpy(eos, "/64");
     char *args[] = { interface->name, "add", addrbuf };
 
+    if (interface->link_route_adder_process != NULL) {
+        ERROR("interface_prefix_configure: " PUB_S_SRP " already configuring the route.", interface->name);
+        return;
+    }
     INFO("interface_prefix_configure: /sbin/ifconfig %s %s %s", args[0], args[1], args[2]);
     interface->link_route_adder_process = ioloop_subproc("/sbin/ifconfig", args, 3, link_route_done, NULL, interface);
     if (interface->link_route_adder_process == NULL) {
@@ -1535,7 +1543,7 @@ router_advertisement_send(interface_t *interface)
 #define MAX_ICMP_MESSAGE 1280
     message = malloc(MAX_ICMP_MESSAGE);
     if (message == NULL) {
-        ERROR("Unable to construct ICMP Router Advertisement: no memory");
+        ERROR("router_advertisement_send: unable to construct ICMP Router Advertisement: no memory");
         return;
     }
 
@@ -1554,12 +1562,12 @@ router_advertisement_send(interface_t *interface)
     dns_u8_to_wire(&towire, 0);                 // Flags.  We don't offer DHCP, so We set neither the M nor the O bit.
     // We are not a home agent, so no H bit.  Lifetime is 0, so Prf is 0.
 #ifdef ROUTER_LIFETIME_HACK
-    dns_u16_to_wire(&towire, 1800);             // Router lifetime, hacked.  This shouldn't ever be enabled.
+    dns_u16_to_wire(&towire, 30 * 60);             // Router lifetime, hacked.  This shouldn't ever be enabled.
 #else
 #ifdef RA_TESTER
     // Advertise a default route on the simulated thread network
     if (!strcmp(interface->name, thread_interface_name)) {
-        dns_u16_to_wire(&towire, 1800);         // Router lifetime for default route
+        dns_u16_to_wire(&towire, 30 * 60);         // Router lifetime for default route
     } else {
 #endif
         dns_u16_to_wire(&towire, 0);            // Router lifetime for non-default default route(s).
@@ -1575,8 +1583,8 @@ router_advertisement_send(interface_t *interface)
         dns_u8_to_wire(&towire, ND_OPT_SOURCE_LINKADDR);
         dns_u8_to_wire(&towire, 1); // length / 8
         dns_rdata_raw_data_to_wire(&towire, &interface->link_layer, sizeof(interface->link_layer));
-        INFO("Advertising source lladdr " PRI_MAC_ADDR_SRP " on " PUB_S_SRP, MAC_ADDR_PARAM_SRP(interface->link_layer),
-             interface->name);
+        INFO("router_advertisement_send: advertising source lladdr " PRI_MAC_ADDR_SRP
+             " on " PUB_S_SRP, MAC_ADDR_PARAM_SRP(interface->link_layer), interface->name);
     }
 
 #ifndef RA_TESTER
@@ -1585,12 +1593,21 @@ router_advertisement_send(interface_t *interface)
         dns_u8_to_wire(&towire, ND_OPT_MTU);
         dns_u8_to_wire(&towire, 1); // length / 8
         dns_u32_to_wire(&towire, 1280);
-        INFO("Advertising MTU of 1280 on " PUB_S_SRP, interface->name);
+        INFO("router_advertisement_send: advertising MTU of 1280 on " PUB_S_SRP, interface->name);
     }
 #endif
 
+#if !defined(__OPEN_SOURCE) && !defined(POSIX_BUILD)
+    time_t present = time(NULL);
+#endif
     // Send Prefix Information option if there's no IPv6 on the link.
     if (interface->advertise_ipv6_prefix) {
+#if !defined(__OPEN_SOURCE) && !defined(POSIX_BUILD)
+        // Should never be NULL here.
+        if (interface->link != NULL) {
+            interface->link->invalid_time = present + interface->preferred_lifetime;
+        }
+#endif
         dns_u8_to_wire(&towire, ND_OPT_PREFIX_INFORMATION);
         dns_u8_to_wire(&towire, 4); // length / 8
         dns_u8_to_wire(&towire, 64); // On-link prefix is always 64 bits
@@ -1600,9 +1617,40 @@ router_advertisement_send(interface_t *interface)
         dns_u32_to_wire(&towire, 0); // Reserved
         dns_rdata_raw_data_to_wire(&towire, &interface->ipv6_prefix, sizeof interface->ipv6_prefix);
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, ipv6_prefix_buf);
-        INFO("Advertising on-link prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " on " PUB_S_SRP,
+        INFO("router_advertisement_send: advertising on-link prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " on " PUB_S_SRP,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, ipv6_prefix_buf), interface->name);
+
     }
+
+#if !defined(__OPEN_SOURCE) && !defined(POSIX_BUILD)
+    // Deprecate any on-link prefixes we may have sent.
+    network_link_t *link;
+    for (link = network_links; link != NULL; link = link->next) {
+        char hexbuf[60];
+        dump_network_signature(hexbuf, sizeof hexbuf, link->signature, link->signature_length);
+        INFO("router_advertisement_send: link " PRI_S_SRP ", prefix number %d, primary " PRI_S_SRP
+             ", invalid %lu, now %lu", hexbuf, link->prefix_number,
+             link->primary == NULL ? "<NULL>" : link->primary->name, link->invalid_time, present);
+        if ((link->primary == NULL || !link->primary->advertise_ipv6_prefix) && link->invalid_time > present) {
+            struct in6_addr prefix;
+            prefix = ula_prefix;
+            prefix.s6_addr[6] = link->prefix_number >> 8;
+            prefix.s6_addr[7] = link->prefix_number & 255;
+
+            dns_u8_to_wire(&towire, ND_OPT_PREFIX_INFORMATION);
+            dns_u8_to_wire(&towire, 4); // length / 8
+            dns_u8_to_wire(&towire, 64); // On-link prefix is always 64 bits
+            dns_u8_to_wire(&towire, ND_OPT_PI_FLAG_ONLINK | ND_OPT_PI_FLAG_AUTO); // On link, autoconfig
+            dns_u32_to_wire(&towire, 0); // valid lifetime is zero.
+            dns_u32_to_wire(&towire, 0); // preferred lifetime is zero.
+            dns_u32_to_wire(&towire, 0); // Reserved
+            dns_rdata_raw_data_to_wire(&towire, &prefix, sizeof prefix);
+            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix.s6_addr, ipv6_prefix_buf);
+            INFO("router_advertisement_send: deprecated on-link prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " on " PUB_S_SRP,
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix.s6_addr, ipv6_prefix_buf), interface->name);
+        }
+    }
+#endif
 
 #ifndef ND_OPT_ROUTE_INFORMATION
 #define ND_OPT_ROUTE_INFORMATION 24
@@ -1649,7 +1697,7 @@ router_advertisement_send(interface_t *interface)
             dns_u8_to_wire(&towire, 2); // length / 8
             dns_u8_to_wire(&towire, 64); // Interface prefixes are always 64 bits
             dns_u8_to_wire(&towire, 0); // There's no reason at present to prefer one Thread BR over another
-            dns_u32_to_wire(&towire, 1800); // Route lifetime 1800 seconds (30 minutes)
+            dns_u32_to_wire(&towire, 30 * 60); // Route lifetime 1800 seconds (30 minutes)
             dns_rdata_raw_data_to_wire(&towire, &ifroute->ipv6_prefix, 8); // /64 requires 8 bytes.
             SEGMENTED_IPv6_ADDR_GEN_SRP(ifroute->ipv6_prefix.s6_addr, ipv6_prefix_buf);
             INFO("Sending route to " PRI_SEGMENTED_IPv6_ADDR_SRP "%%" PUB_S_SRP " on " PUB_S_SRP,
@@ -1667,7 +1715,7 @@ router_advertisement_send(interface_t *interface)
         dns_u8_to_wire(&towire, 2); // length / 8
         dns_u8_to_wire(&towire, 64); // Interface prefixes are always 64 bits
         dns_u8_to_wire(&towire, 0); // There's no reason at present to prefer one Thread BR over another
-        dns_u32_to_wire(&towire, 1800); // Route lifetime 1800 seconds (30 minutes)
+        dns_u32_to_wire(&towire, 30 * 60); // Route lifetime 1800 seconds (30 minutes)
         dns_rdata_raw_data_to_wire(&towire, &advertised_thread_prefix->prefix, 8); // /64 requires 8 bytes.
         SEGMENTED_IPv6_ADDR_GEN_SRP(advertised_thread_prefix->prefix.s6_addr, thread_prefix_buf);
         INFO("Sending route to " PRI_SEGMENTED_IPv6_ADDR_SRP "%%" PUB_S_SRP " on " PUB_S_SRP,
@@ -1681,7 +1729,7 @@ router_advertisement_send(interface_t *interface)
     dns_u8_to_wire(&towire, 3); // length / 8
     dns_u8_to_wire(&towire, 48); // ULA prefixes are always 48 bits
     dns_u8_to_wire(&towire, 0); // There's no reason at present to prefer one Thread BR over another
-    dns_u32_to_wire(&towire, 1800); // Route lifetime 1800 seconds (30 minutes)
+    dns_u32_to_wire(&towire, 30 * 60); // Route lifetime 1800 seconds (30 minutes)
     dns_rdata_raw_data_to_wire(&towire, &ula_prefix, 16); // /48 requires 16 bytes
 #endif // SKIP_SLASH_48
 #endif // SEND_INTERFACE_SPECIFIC_RIOS
@@ -1935,24 +1983,8 @@ ula_setup(void)
             if (CFGetTypeID(plist) == CFArrayGetTypeID()) {
                 bool success = true;
                 CFArrayApplyFunction(plist, CFRangeMake(0,CFArrayGetCount(plist)), network_link_apply, &success);
-                if (success) {
-                    network_link_array = CFArrayCreateMutableCopy(NULL, 0, plist);
-                    if (network_link_array == NULL) {
-                        ERROR("ula_setup: no memory for network link array!");
-                    }
-                }
             }
             CFRelease(plist);
-        }
-    }
-
-    // If we didn't get any links, make an empty array.
-    if (network_link_array == NULL) {
-        network_link_array = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
-        if (network_link_array == NULL) {
-            ERROR("ula_setup: unable to make network_link_array.");
-        } else {
-            INFO("ula_setup: created empty network_link_array.");
         }
     }
 #else
@@ -2306,14 +2338,18 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
         if (change == interface_address_added) {
             // Just got an IPv4 address?
             if (!interface->num_ipv4_addresses) {
-                interface_prefix_evaluate(interface);
+                if (!(flags & (IFF_LOOPBACK | IFF_POINTOPOINT))) {
+                    interface_prefix_evaluate(interface);
+                }
             }
             interface->num_ipv4_addresses++;
         } else if (change == interface_address_deleted) {
             interface->num_ipv4_addresses--;
             // Just lost our last IPv4 address?
-            if (!interface->num_ipv4_addresses) {
-                interface_prefix_evaluate(interface);
+            if (!(flags & (IFF_LOOPBACK | IFF_POINTOPOINT))) {
+                if (!interface->num_ipv4_addresses) {
+                    interface_prefix_evaluate(interface);
+                }
             }
         }
     } else if (address->sa.sa_family == AF_INET6) {

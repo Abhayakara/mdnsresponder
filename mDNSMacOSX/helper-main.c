@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -259,42 +259,6 @@ static void handle_request(xpc_object_t req)
             break;
         }
             
-        case p2p_packetfilter:
-        {
-            size_t count = 0;
-            pfArray_t pfports;
-            pfArray_t pfprotocols;
-            const char *if_name;
-            uint32_t cmd;
-            xpc_object_t xpc_obj_port_array;
-            size_t port_array_count = 0;
-            xpc_object_t xpc_obj_protocol_array;
-            size_t protocol_array_count = 0;
-            
-            cmd = xpc_dictionary_get_uint64(req, "pf_opcode");
-            if_name = xpc_dictionary_get_string(req, "pf_ifname");
-            xpc_obj_port_array = xpc_dictionary_get_value(req, "xpc_obj_array_port");
-            if ((void *)xpc_obj_port_array != NULL)
-                port_array_count = xpc_array_get_count(xpc_obj_port_array);
-            xpc_obj_protocol_array = xpc_dictionary_get_value(req, "xpc_obj_array_protocol");
-            if ((void *)xpc_obj_protocol_array != NULL)
-                protocol_array_count = xpc_array_get_count(xpc_obj_protocol_array);
-            if (port_array_count != protocol_array_count)
-                break;
-            if (port_array_count > PFPortArraySize)
-                break;
-            count = port_array_count;
-
-            for (size_t i = 0; i < count; i++) {
-                pfports[i] = (uint16_t)xpc_array_get_uint64(xpc_obj_port_array, i);
-                pfprotocols[i] = (uint16_t)xpc_array_get_uint64(xpc_obj_protocol_array, i);
-            }
-
-            os_log_info(log_handle,"Calling new PacketFilterControl()");
-            PacketFilterControl(cmd, if_name, count, pfports, pfprotocols);
-            break;
-        }
-            
         case user_notify:
         {
             const char *title;
@@ -391,46 +355,6 @@ static void handle_request(xpc_object_t req)
             break;
         }
     
-        case retreive_tcpinfo:
-        {
-            uint16_t lport, rport;
-            int family;
-            uint32_t seq, ack;
-            uint16_t win;
-            int32_t  intfid;
-            size_t laddr_len, raddr_len;
-            
-            lport    = xpc_dictionary_get_uint64(req, "retreive_tcpinfo_lport");
-            rport    = xpc_dictionary_get_uint64(req, "retreive_tcpinfo_rport");
-            family   = xpc_dictionary_get_uint64(req, "retreive_tcpinfo_family");
-
-            const uint8_t * const laddr = (const uint8_t *)xpc_dictionary_get_data(req, "retreive_tcpinfo_laddr", &laddr_len);
-            const uint8_t * const raddr = (const uint8_t *)xpc_dictionary_get_data(req, "retreive_tcpinfo_raddr", &raddr_len);
-            if ((laddr_len != sizeof(v6addr_t)) || (raddr_len != sizeof(v6addr_t)))
-            {
-                error_code = kHelperErr_ParamErr;
-                break;
-            }
-
-            os_log_info(log_handle, "helper-main: handle_request: retreive_tcpinfo: lport is[%d] rport is[%d] family is [%d]",
-                           lport, rport, family);
-            
-            RetrieveTCPInfo(family, laddr, lport, raddr, rport, &seq, &ack, &win, &intfid, &error_code);
-            
-            if (response)
-            {
-                xpc_dictionary_set_uint64(response, "retreive_tcpinfo_seq",  seq);
-                xpc_dictionary_set_uint64(response, "retreive_tcpinfo_ack",  ack);
-                xpc_dictionary_set_uint64(response, "retreive_tcpinfo_win",  win);
-                xpc_dictionary_set_uint64(response, "retreive_tcpinfo_ifid", intfid);
-            }
-            
-            os_log_info(log_handle, "helper-main: handle_request: retreive_tcpinfo: seq is[%d] ack is[%d] win is [%d] intfid is [%d]",
-                           seq, ack, win, intfid);
-
-            break;
-        }
-            
         case keychain_getsecrets:
         {
             unsigned int num_sec  = 0;

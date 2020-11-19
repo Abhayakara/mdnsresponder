@@ -45,13 +45,6 @@ extern void D2D_stop_advertising_interface(NetworkInterfaceInfo *interface);
 extern void D2D_start_advertising_record(AuthRecord *ar);
 extern void D2D_stop_advertising_record(AuthRecord *ar);
 
-#if ENABLE_BLE_TRIGGERED_BONJOUR
-// Just define as the current max value for now for BLE.c prototype.
-// TODO: Will need to define in DeviceToDeviceManager.framework if we convert the
-// BLE discovery code to a D2D plugin.
-#define D2DBLETransport D2DTransportMax
-#endif // ENABLE_BLE_TRIGGERED_BONJOUR
-
 #ifdef UNIT_TEST
 #pragma mark - Unit test declarations
 

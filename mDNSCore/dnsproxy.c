@@ -16,6 +16,7 @@
  */
 
 #include "dnsproxy.h"
+#include "mdns_strict.h"
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
 #include <nw/private.h>

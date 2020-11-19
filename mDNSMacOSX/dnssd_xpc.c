@@ -15,6 +15,7 @@
  */
 
 #include "dnssd_xpc.h"
+#include "mdns_strict.h"
 
 //======================================================================================================================
 // MARK: - XPC Dictionary Helper Declarations
@@ -327,7 +328,8 @@ dnssd_xpc_parameters_add_resolver_uuid(xpc_object_t params, uuid_t _Nonnull uuid
 	if (resolver_uuid_array == NULL) {
 		resolver_uuid_array = xpc_array_create(NULL, 0);
 		xpc_dictionary_set_value(params, DNSSD_XPC_PARAMETERS_KEY_RESOLVER_UUIDS, resolver_uuid_array);
-		xpc_release(resolver_uuid_array);
+		xpc_object_t tmp = resolver_uuid_array;
+		xpc_forget(&tmp);
 	}
 	xpc_array_set_uuid(resolver_uuid_array, XPC_ARRAY_APPEND, uuid);
 }

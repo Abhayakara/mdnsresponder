@@ -21,6 +21,8 @@
 #include "dnsproxy.h"
 #include "mDNSMacOSX.h"
 #include "xpc_services.h"
+#include <CoreUtils/CommonServices.h>
+#include "mdns_strict.h"
 
 extern mDNS mDNSStorage;
 static int dps_client_pid; // To track current active client using DNS Proxy Service
@@ -130,7 +132,8 @@ mDNSlocal void accept_dps_client(xpc_connection_t conn)
                 // Only the Client that has activated DPS should be able to terminate it
                 if (c_pid == dps_client_pid)
                     handle_dps_terminate();
-                xpc_release(conn);
+                xpc_object_t tmp = conn;
+                xpc_forget(&tmp);
             }
         });
 
@@ -167,7 +170,7 @@ mDNSlocal void handle_dps_request(xpc_object_t req)
             {
                 xpc_dictionary_set_uint64(reply, kDNSDaemonReply, kDNSMsg_Busy);
                 xpc_connection_send_message(remote_conn, reply);
-                xpc_release(reply);
+                xpc_forget(&reply);
             }
             else
             {
@@ -188,7 +191,7 @@ mDNSlocal void handle_dps_request(xpc_object_t req)
     {
         xpc_dictionary_set_uint64(response, kDNSDaemonReply, kDNSMsg_NoError);
         xpc_connection_send_message(remote_conn, response);
-        xpc_release(response);
+        xpc_forget(&response);
     }
     else
     {
