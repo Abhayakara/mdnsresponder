@@ -70,6 +70,7 @@
 #include "dns-msg.h"
 #include "ioloop.h"
 #include "route.h"
+#include "adv-ctl-server.h"
 
 # define THREAD_BORDER_ROUTER 1
 # define THREAD_DATA_DIR "/var/lib/openthread"
@@ -1597,17 +1598,8 @@ router_advertisement_send(interface_t *interface)
     }
 #endif
 
-#if !defined(__OPEN_SOURCE) && !defined(POSIX_BUILD)
-    time_t present = time(NULL);
-#endif
     // Send Prefix Information option if there's no IPv6 on the link.
     if (interface->advertise_ipv6_prefix) {
-#if !defined(__OPEN_SOURCE) && !defined(POSIX_BUILD)
-        // Should never be NULL here.
-        if (interface->link != NULL) {
-            interface->link->invalid_time = present + interface->preferred_lifetime;
-        }
-#endif
         dns_u8_to_wire(&towire, ND_OPT_PREFIX_INFORMATION);
         dns_u8_to_wire(&towire, 4); // length / 8
         dns_u8_to_wire(&towire, 64); // On-link prefix is always 64 bits
@@ -1622,35 +1614,6 @@ router_advertisement_send(interface_t *interface)
 
     }
 
-#if !defined(__OPEN_SOURCE) && !defined(POSIX_BUILD)
-    // Deprecate any on-link prefixes we may have sent.
-    network_link_t *link;
-    for (link = network_links; link != NULL; link = link->next) {
-        char hexbuf[60];
-        dump_network_signature(hexbuf, sizeof hexbuf, link->signature, link->signature_length);
-        INFO("router_advertisement_send: link " PRI_S_SRP ", prefix number %d, primary " PRI_S_SRP
-             ", invalid %lu, now %lu", hexbuf, link->prefix_number,
-             link->primary == NULL ? "<NULL>" : link->primary->name, link->invalid_time, present);
-        if ((link->primary == NULL || !link->primary->advertise_ipv6_prefix) && link->invalid_time > present) {
-            struct in6_addr prefix;
-            prefix = ula_prefix;
-            prefix.s6_addr[6] = link->prefix_number >> 8;
-            prefix.s6_addr[7] = link->prefix_number & 255;
-
-            dns_u8_to_wire(&towire, ND_OPT_PREFIX_INFORMATION);
-            dns_u8_to_wire(&towire, 4); // length / 8
-            dns_u8_to_wire(&towire, 64); // On-link prefix is always 64 bits
-            dns_u8_to_wire(&towire, ND_OPT_PI_FLAG_ONLINK | ND_OPT_PI_FLAG_AUTO); // On link, autoconfig
-            dns_u32_to_wire(&towire, 0); // valid lifetime is zero.
-            dns_u32_to_wire(&towire, 0); // preferred lifetime is zero.
-            dns_u32_to_wire(&towire, 0); // Reserved
-            dns_rdata_raw_data_to_wire(&towire, &prefix, sizeof prefix);
-            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix.s6_addr, ipv6_prefix_buf);
-            INFO("router_advertisement_send: deprecated on-link prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " on " PUB_S_SRP,
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix.s6_addr, ipv6_prefix_buf), interface->name);
-        }
-    }
-#endif
 
 #ifndef ND_OPT_ROUTE_INFORMATION
 #define ND_OPT_ROUTE_INFORMATION 24
@@ -3276,9 +3239,9 @@ static void
 partition_prefix_remove_callback(void *UNUSED context, cti_status_t status)
 {
     if (status != kCTIStatus_NoError) {
-        ERROR("partition_unpublish_my_prefix: failed to unpublish my prefix: %d.", status);
+        ERROR("partition_prefix_remove_callback: failed to unpublish my prefix: %d.", status);
     } else {
-        INFO("partition_unpublish_my_prefix: done unpublishing my prefix.");
+        INFO("partition_prefix_remove_callback: done unpublishing my prefix.");
     }
 }
 

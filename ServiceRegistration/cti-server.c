@@ -266,114 +266,33 @@ cti_message_parse(cti_connection_t connection)
 }
 
 static void
-cti_accept(void)
+cti_listen_callback(void)
+
 {
     cti_connection_t connection;
-    struct sockaddr_un addr;
-    socklen_t socksize = sizeof(addr);
-    int fd = accept(cti_listener_fd, (struct sockaddr *)&addr, &socksize);
-    size_t len;
-    struct ucred ucred;
+    int fd;
+    uid_t uid;
+    pid_t pid;
 
-    if (fd < 0) {
-        syslog(LOG_ERR, "cti_accept: accept: %s", strerror(errno));
-        return;
-    }
-
-    len = sizeof(struct ucred);
-    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &ucred, &len) < 0) {
-        syslog(LOG_ERR, "cti_accept: unable to get peer credentials for incoming connection on "
-               SERVER_SOCKET_NAME ": %s", strerror(errno));
-    out:
-        close(fd);
-        return;
-    }
-
-    if (ucred.uid != 0) {
-        char **s;
-        struct group *group = getgrnam("cti-clients");
-        if (group == NULL) {
-            syslog(LOG_ERR, "cti_accept: connecting user %d is not root and there is no cti-clients group.", ucred.uid);
-            goto out;
-        } else if (group->gr_gid == ucred.gid) {
-        } else {
-            struct passwd *passwd = getpwuid(ucred.uid);
-            if (passwd == NULL || passwd->pw_name == NULL) {
-                syslog(LOG_ERR, "cti_accept: connecting user %d is not root and has no username.", ucred.uid);
-                goto out;
-            } else if (group->gr_mem == NULL || *group->gr_mem == NULL) {
-                syslog(LOG_ERR, "cti_accept: connecting user %s is not a member of cti-clients group.", passwd->pw_name);
-                goto out;
-            } else {
-                for (s = group->gr_mem; s != NULL && *s != NULL; s++) {
-                    if (!strcmp(*s, passwd->pw_name)) {
-                        break;
-                    }
-                }
-                if (*s == NULL) {
-                    syslog(LOG_ERR, "cti_accept: connecting user %s is not a member of cti-clients group.", passwd->pw_name);
-                    goto out;
-                }
-            }
-        }
-    }
-
-#ifdef SO_NOSIGPIPE
-    if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one) < 0) {
-        syslog(LOG_ERR, "SO_NOSIGPIPE failed: %s", strerror(errno));
-
-#endif
-    if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0) {
-        syslog(LOG_ERR, "cti_accept: can't set O_NONBLOCK: %s", strerror(errno));
-        goto out;
-    }
+    fd = cti_accept(cti_listener_fd, &uid, NULL, &pid);
 
     // User is authenticated.
     connection = cti_connection_allocate(100);
     if (connection == NULL) {
-        goto out;
+        close(fd);
+        return;
     }
     connection->fd = fd;
     connection->next = connections;
     connections = connection;
-    syslog(LOG_INFO, "cti_accept: connection from user %d accepted", ucred.uid);
+    syslog(LOG_INFO, "cti_accept: connection from user %d, pid %d accepted", uid, pid);
 }
 
 int
 cti_init(void)
 {
-    struct sockaddr_un addr;
-
-    if (unlink(SERVER_SOCKET_NAME) < 0 && errno != ENOENT) {
-        syslog(LOG_ERR, "cti_init: unlink(" SERVER_SOCKET_NAME ": %s", strerror(errno));
-        return -1;
-    }
-
-    addr.sun_family = AF_LOCAL;
-    if (sizeof(SERVER_SOCKET_NAME) > sizeof(addr.sun_path)) {
-        syslog(LOG_ERR, "cti_init: no space for unix socket named " SERVER_SOCKET_NAME ".");
-        return -1;
-    }
-    strncpy(addr.sun_path, SERVER_SOCKET_NAME, sizeof(addr.sun_path));
-#ifndef NOT_HAVE_SA_LEN
-    addr.sun_len = strlen(addr.sun_path) + 1 + sizeof(addr.sun_len) + sizeof(addr.sun_family);
-#endif
-
-    cti_listener_fd = socket(AF_LOCAL, SOCK_STREAM, 0);
-    if (cti_listener_fd < 0) {
-        syslog(LOG_ERR, "cti_init: socket: %s", strerror(errno));
-        return -1;
-    }
-
-    if (bind(cti_listener_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        syslog(LOG_ERR, "cti_init: %s", strerror(errno));
-        close(cti_listener_fd);
-        return -1;
-    }
-
-    if (listen(cti_listener_fd, 1) < 0) {
-        syslog(LOG_ERR, "cti_init: listen: %s", strerror(errno));
-        close(cti_listener_fd);
+    cti_listener_fd = cti_make_unix_socket(CTI_SERVER_SOCKET_NAME, sizeof(CTI_SERVER_SOCKET_NAME), true);
+    if (cti_listener_fd == -1) {
         return -1;
     }
     return 0;
@@ -417,7 +336,7 @@ cti_fd_process(fd_set *r)
     cti_connection_t connection;
 
     if (FD_ISSET(cti_listener_fd, r)) {
-        cti_accept();
+        cti_listen_callback();
     }
 
     for (connection = connections; connection; connection = connection->next) {

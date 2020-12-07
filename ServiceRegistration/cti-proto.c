@@ -17,6 +17,7 @@
  * CTI protocol communication primitives
  */
 
+#define _GNU_SOURCE 1
 #include <stdio.h>
 #include <arpa/inet.h>
 #include <string.h>
@@ -26,6 +27,12 @@
 #include <fcntl.h>
 #include <syslog.h>
 #include <stdint.h>
+#include <pwd.h>
+#include <grp.h>
+#include <sys/un.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/signal.h>
 
 #include "cti-common.h"
 #include "cti-proto.h"
@@ -355,7 +362,6 @@ cti_connection_message_send(cti_connection_t connection)
 bool
 cti_send_response(cti_connection_t connection, int status)
 {
-
 	if (cti_connection_message_create(connection, kCTIMessageType_Response, 10) &&
 		cti_connection_u16_put(connection, connection->message_type) &&
 		cti_connection_u32_put(connection, status))
@@ -425,6 +431,140 @@ cti_connection_allocate(uint16_t expected_size)
 	}
 	connection->input.expected = 2;
 	return connection;
+}
+
+int
+cti_make_unix_socket(const char *sockname, size_t name_size, bool is_listener)
+{
+    struct sockaddr_un addr;
+    int fd;
+
+    if (is_listener && (unlink(sockname) < 0 && errno != ENOENT)) {
+        syslog(LOG_ERR, "cti_make_unix_socket: unlink(%s: %s", sockname, strerror(errno));
+        return -1;
+    }
+
+    addr.sun_family = AF_LOCAL;
+    if (name_size > sizeof(addr.sun_path)) {
+        syslog(LOG_ERR, "cti_make_unix_socket: no space for unix socket named %s.", sockname);
+        return -1;
+    }
+    strncpy(addr.sun_path, sockname, sizeof(addr.sun_path));
+#ifndef NOT_HAVE_SA_LEN
+    addr.sun_len = strlen(addr.sun_path) + 1 + sizeof(addr.sun_len) + sizeof(addr.sun_family);
+#endif
+
+    fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+    if (fd < 0) {
+        syslog(LOG_ERR, "cti_make_unix_socket: socket: %s", strerror(errno));
+        return -1;
+    }
+
+    if (is_listener) {
+        if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            syslog(LOG_ERR, "cti_make_unix_socket: %s", strerror(errno));
+            goto out;
+        }
+
+        if (listen(fd, 1) < 0) {
+            syslog(LOG_ERR, "cti_make_unix_socket: listen: %s", strerror(errno));
+            goto out;
+        }
+    } else {
+        if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            syslog(LOG_ERR, "cti_make_unix_socket: connect: %s", strerror(errno));
+            goto out;
+        }
+
+#ifdef SO_NOSIGPIPE
+        if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one) < 0) {
+            syslog(LOG_ERR, "cti_make_unix_socket: SO_NOSIGPIPE failed: %s", strerror(errno));
+            goto out;
+        }
+#endif
+        if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0) {
+            syslog(LOG_ERR, "cti_make_unix_socket: can't set O_NONBLOCK: %s", strerror(errno));
+        out:
+            close(fd);
+            return -1;
+        }
+    }
+    return fd;
+}
+
+int
+cti_accept(int listen_fd, uid_t *p_uid, gid_t *p_gid, pid_t *p_pid)
+{
+    struct sockaddr_un addr;
+    socklen_t socksize = sizeof(addr);
+    int fd = accept(listen_fd, (struct sockaddr *)&addr, &socksize);
+    size_t len;
+    struct ucred ucred;
+
+    if (fd < 0) {
+        syslog(LOG_ERR, "cti_accept: accept: %s", strerror(errno));
+        return -1;
+    }
+
+    len = sizeof(struct ucred);
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &ucred, &len) < 0) {
+        syslog(LOG_ERR, "cti_accept: unable to get peer credentials for incoming connection: %s", strerror(errno));
+    out:
+        close(fd);
+        return -1;
+    }
+
+    if (ucred.uid != 0) {
+        char **s;
+        struct group *group = getgrnam("cti-clients");
+        if (group == NULL) {
+            syslog(LOG_ERR, "cti_accept: connecting user %d is not root and there is no cti-clients group.", ucred.uid);
+            goto out;
+        } else if (group->gr_gid == ucred.gid) {
+        } else {
+            struct passwd *passwd = getpwuid(ucred.uid);
+            if (passwd == NULL || passwd->pw_name == NULL) {
+                syslog(LOG_ERR, "cti_accept: connecting user %d is not root and has no username.", ucred.uid);
+                goto out;
+            } else if (group->gr_mem == NULL || *group->gr_mem == NULL) {
+                syslog(LOG_ERR, "cti_accept: connecting user %s is not a member of cti-clients group.", passwd->pw_name);
+                goto out;
+            } else {
+                for (s = group->gr_mem; s != NULL && *s != NULL; s++) {
+                    if (!strcmp(*s, passwd->pw_name)) {
+                        break;
+                    }
+                }
+                if (*s == NULL) {
+                    syslog(LOG_ERR, "cti_accept: connecting user %s is not a member of cti-clients group.", passwd->pw_name);
+                    goto out;
+                }
+            }
+        }
+    }
+
+#ifdef SO_NOSIGPIPE
+    if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one) < 0) {
+        syslog(LOG_ERR, "SO_NOSIGPIPE failed: %s", strerror(errno));
+
+#endif
+    if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0) {
+        syslog(LOG_ERR, "cti_accept: can't set O_NONBLOCK: %s", strerror(errno));
+        goto out;
+    }
+
+    if (p_uid != NULL) {
+        *p_uid = ucred.uid;
+    }
+    if (p_gid != NULL) {
+        *p_gid = ucred.gid;
+    }
+    if (p_pid != NULL) {
+        *p_pid = ucred.pid;
+    }
+
+    syslog(LOG_INFO, "cti_accept: connection from user %d accepted", ucred.uid);
+    return fd;
 }
 
 // Local Variables:

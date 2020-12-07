@@ -17,6 +17,9 @@
  * This file contains structure definitions used by the SRP Advertising Proxy.
  */
 
+#ifndef __SRP_MDNS_PROXY_H__
+#define __SRP_MDNS_PROXY_H__ 1
+
 typedef struct adv_instance adv_instance_t;
 typedef struct adv_address_registration adv_address_t;
 typedef struct adv_host adv_host_t;
@@ -165,6 +168,9 @@ struct client_update {
     bool serial_sent;                         // True if serial number was sent.
 
 };
+
+extern adv_host_t *NULLABLE hosts;
+#endif // __SRP_MDNS_PROXY_H__
 
 // Local Variables:
 // mode: C

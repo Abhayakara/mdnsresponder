@@ -44,14 +44,13 @@
 #include "srp-mdns-proxy.h"
 #include "config-parse.h"
 #include "route.h"
-
+#include "adv-ctl-server.h"
 
 // Server internal state
 struct {
     struct in6_addr addr;
     int width;
 } *preferred_prefix;
-
 
 adv_host_t *hosts;
 int advertise_interface = kDNSServiceInterfaceIndexAny;
@@ -2041,7 +2040,6 @@ srp_mdns_flush(void)
     hosts = NULL;
 }
 
-
 static void
 usage(void)
 {
@@ -2094,6 +2092,11 @@ main(int argc, char **argv)
     }
 
     thread_network_startup();
+
+    if (adv_ctl_init() != kDNSServiceErr_NoError) {
+        ERROR("Can't start advertising proxy control server.");
+        return 1;
+    }
 
     // We require one open file per service and one per instance.
     struct rlimit limits;

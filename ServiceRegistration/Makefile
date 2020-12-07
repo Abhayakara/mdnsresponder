@@ -25,8 +25,9 @@ endif
 
 INSTALL?=install
 
+INCLUDEDIRS=-I../mDNSShared -I../mDNSMacOSX/Private -I../mDNSMacOSX/xpc_services
 ifeq ($(os),x)
-SRPCFLAGS = -O0 -g -Wall -Werror -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $@} -DUSE_KQUEUE -DHAVE_SOCKADDR_DL -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DEXCLUDE_TLS -DPOSIX_BUILD -D__APPLE_USE_RFC_3542
+SRPCFLAGS = -O0 -g -Wall -Werror -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private $(INCLUDEDIRS) -I../DSO -MMD -MF .depfile-${notdir $@} -DUSE_KQUEUE -DHAVE_SOCKADDR_DL -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DEXCLUDE_TLS -DPOSIX_BUILD -D__APPLE_USE_RFC_3542
 SRPLDOPTS = -framework CoreServices -framework Security -framework CoreFoundation -framework Network
 HMACOBJS     = $(OBJDIR)/hmac-macos.o
 SIGNOBJS     = $(OBJDIR)/sign-macos.o $(OBJDIR)/srp-filedata.o
@@ -35,7 +36,7 @@ TLSOBJS      =
 IOOBJS       = $(OBJDIR)/ioloop.o $(OBJDIR)/posix.o
 IOWOTLSOBJS  = $(OBJDIR)/ioloop.o $(OBJDIR)/posix.o
 else ifeq ($(os), linux)
-SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DUSE_INOTIFY -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD
+SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private $(INCLUDEDIRS) -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DUSE_INOTIFY -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD
 SRPLDOPTS = /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedx509.a /usr/local/lib/libmbedcrypto.a -lbsd
 #SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 HMACOBJS     = $(OBJDIR)/hmac-mbedtls.o
@@ -45,7 +46,7 @@ TLSOBJS      = $(OBJDIR)/tls-mbedtls.o
 IOOBJS       = $(OBJDIR)/ioloop.o $(OBJDIR)/posix.o $(TLSOBJS)
 IOWOTLSOBJS  = $(OBJDIR)/ioloop-notls.o $(OBJDIR)/posix.o
 else ifeq ($(os), linux-uclibc)
-SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DLINUX_GETENTROPY -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD
+SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private $(INCLUDEDIRS) -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DLINUX_GETENTROPY -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD
 SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509 -lbsd
 HMACOBJS     = $(OBJDIR)/hmac-mbedtls.o
 SIGNOBJS     = $(OBJDIR)/sign-mbedtls.o $(OBJDIR)/srp-filedata.o
@@ -55,10 +56,10 @@ IOOBJS       = $(OBJDIR)/ioloop.o $(OBJDIR)/posix.o $(TLSOBJS)
 IOWOTLSOBJS  = $(OBJDIR)/ioloop-notls.o $(OBJDIR)/posix.o
 else ifeq ($(os), raspbian)
 ifdef ASAN
-SRPCFLAGS    = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DRPI -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD -fsanitize=address
+SRPCFLAGS    = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private $(INCLUDEDIRS) -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DRPI -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD -fsanitize=address
 SRPLDOPTS    = -lasan -lmbedtls -lmbedx509 -lmbedcrypto -lbsd
 else
-SRPCFLAGS    = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DRPI -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD
+SRPCFLAGS    = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private $(INCLUDEDIRS) -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DRPI -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD
 SRPLDOPTS    = -lmbedtls -lmbedx509 -lmbedcrypto -lbsd
 endif
 HMACOBJS     = $(OBJDIR)/hmac-mbedtls.o
@@ -71,7 +72,7 @@ else
 SRPCFLAGS=$(os) $(os_id)
 endif
 
-all:	setup $(BUILDDIR)/srp-client $(BUILDDIR)/srp-mdns-proxy $(BUILDDIR)/keydump $(BUILDDIR)/dnssd-proxy $(BUILDDIR)/cti-server # $(BUILDDIR)/srp-dns-proxy $(BUILDDIR)/dnssd-relay
+all:	setup $(BUILDDIR)/srp-client $(BUILDDIR)/srp-mdns-proxy $(BUILDDIR)/keydump $(BUILDDIR)/dnssd-proxy $(BUILDDIR)/cti-server $(BUILDDIR)/srputil # $(BUILDDIR)/srp-dns-proxy $(BUILDDIR)/dnssd-relay
 
 install: all
 	$(INSTALL) -D $(BUILDDIR)/srp-client $(INSTALL_PREFIX)/sbin/srp-client
@@ -109,7 +110,7 @@ $(BUILDDIR)/srp-client:	$(OBJDIR)/srp-ioloop.o $(OBJDIR)/srp-client.o $(OBJDIR)/
 $(BUILDDIR)/srp-dns-proxy:	$(OBJDIR)/srp-dns-proxy.o $(OBJDIR)/srp-parse.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
-$(BUILDDIR)/srp-mdns-proxy:	$(OBJDIR)/srp-mdns-proxy.o $(OBJDIR)/srp-parse.o $(OBJDIR)/route.o $(CTIOBJS) $(MDNSOBJS) $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
+$(BUILDDIR)/srp-mdns-proxy:	$(OBJDIR)/srp-mdns-proxy.o $(OBJDIR)/srp-parse.o $(OBJDIR)/route.o $(OBJDIR)/adv-ctl-server.o $(CTIOBJS) $(MDNSOBJS) $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(BUILDDIR)/keydump:	$(OBJDIR)/keydump.o $(MDNSOBJS) $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS)
@@ -118,17 +119,23 @@ $(BUILDDIR)/keydump:	$(OBJDIR)/keydump.o $(MDNSOBJS) $(SIMPLEOBJS) $(FROMWIREOBJ
 $(BUILDDIR)/cti-server:	$(OBJDIR)/cti-server.o $(OBJDIR)/cti-proto-noioloop.o
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
+$(BUILDDIR)/srputil:	$(OBJDIR)/srputil.o $(OBJDIR)/advertising_proxy_services.o $(CTIOBJS) $(MDNSOBJS) $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS)
+	$(CC) -o $@ $+ $(SRPLDOPTS)
+
 $(OBJDIR)/dso.o:	../DSO/dso.c
-	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. -I../mDNSShared $<
+	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. $(INCLUDEDIRS) $<
 
 $(OBJDIR)/dnssd_clientstub.o:  ../mDNSShared/dnssd_clientstub.c
-	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. -I../mDNSShared $<
+	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. $(INCLUDEDIRS) $<
 
 $(OBJDIR)/dnssd_clientlib.o:  ../mDNSShared/dnssd_clientlib.c
-	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. -I../mDNSShared $<
+	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. $(INCLUDEDIRS) $<
 
 $(OBJDIR)/dnssd_ipc.o:  ../mDNSShared/dnssd_ipc.c
-	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. -I../mDNSShared $<
+	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. $(INCLUDEDIRS) $<
+
+$(OBJDIR)/srputil.o: ../Clients/srputil/srputil.c
+	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. $(INCLUDEDIRS) $<
 
 $(OBJDIR)/ioloop-notls.o: ioloop.c
 	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -DEXCLUDE_TLS -DEXCLUDE_DNSSD_TXN_SUPPORT -c  $<
@@ -142,11 +149,14 @@ $(OBJDIR)/cti-server.o: cti-server.c
 $(OBJDIR)/%.o:	%.c
 	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c  $<
 
+-include .depfile-adv-ctl-server.o
+-include .depfile-advertising_proxy_services.o
 -include .depfile-config-parse.o
 -include .depfile-cti-proto-noioloop.o
 -include .depfile-cti-proto.o
 -include .depfile-cti-server.o
 -include .depfile-cti-services.o
+-include .depfile-dnssd_clientlib.o
 -include .depfile-dnssd_clientstub.o
 -include .depfile-dnssd_ipc.o
 -include .depfile-dnssd-proxy.o
@@ -164,8 +174,8 @@ $(OBJDIR)/%.o:	%.c
 -include .depfile-srp-ioloop.o
 -include .depfile-srp-mdns-proxy.o
 -include .depfile-srp-parse.o
+-include .depfile-srputil.o
 -include .depfile-tls-mbedtls.o
 -include .depfile-towire.o
 -include .depfile-verify-mbedtls.o
 -include .depfile-wireutils.o
--include .depfile-cti-openthread.o

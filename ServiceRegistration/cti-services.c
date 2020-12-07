@@ -36,8 +36,6 @@
 
 static void cti_message_parse(cti_connection_t connection);
 
-#define THREAD_SERVICE_SEND_BOTH 1
-
 
 //*************************************************************************************************************
 // Globals
@@ -144,49 +142,20 @@ cti_connection_create(void *context, cti_callback_t callback,
     }
     RETAIN_HERE(connection);
 
-    struct sockaddr_un addr;
-
-    if (strlen(SERVER_SOCKET_NAME) + 1 >= sizeof(addr.sun_path)) {
-        ERROR("cti_connection_create: no space for " SERVER_SOCKET_NAME ".");
-        cti_connection_release(connection);
-        return kCTIStatus_NoMemory;
-    }
-
-    addr.sun_family = AF_LOCAL;
-    strncpy(addr.sun_path, SERVER_SOCKET_NAME, sizeof(addr.sun_path));
-#ifndef NOT_HAVE_SA_LEN
-    addr.sun_len = strlen(addr.sun_path) + 1 + sizeof(addr.sun_len) + sizeof(addr.sun_family);
-#endif
-
-    connection->fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+    connection->fd = cti_make_unix_socket(CTI_SERVER_SOCKET_NAME, sizeof(CTI_SERVER_SOCKET_NAME), false);
     if (connection->fd < 0) {
-        int ret = errno == EPERM ? kCTIStatus_NotPermitted : kCTIStatus_UnknownError;
+        int ret = errno == ECONNREFUSED ? kCTIStatus_DaemonNotRunning : EPERM ? kCTIStatus_NotPermitted : kCTIStatus_UnknownError;
         ERROR("cti_connection_create: socket: %s", strerror(errno));
         cti_connection_release(connection);
         return ret;
     }
 
-    if (connect(connection->fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        syslog(LOG_ERR, "cti_connection_create: %s", strerror(errno));
-    out:
-        close(connection->fd);
-        cti_connection_release(connection);
-        return kCTIStatus_DaemonNotRunning;
-    }
-
-#ifdef SO_NOSIGPIPE
-    if (setsockopt(connection->fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one) < 0) {
-        ERROR("cti_connection_create: SO_NOSIGPIPE failed: %s", strerror(errno));
-        goto out;
-    }
-#endif
-    if (fcntl(connection->fd, F_SETFL, O_NONBLOCK) < 0) {
-        ERROR("cti_connection_create: can't set O_NONBLOCK: %s", strerror(errno));
-        goto out;
-    }
     connection->io_context = ioloop_file_descriptor_create(connection->fd, connection, cti_fd_finalize);
     if (connection->io_context == NULL) {
-        goto out;
+        ERROR("cti_connection_create: can't create file descriptor object.");
+        close(connection->fd);
+        cti_connection_release(connection);
+        return kCTIStatus_NoMemory;
     }
     ioloop_add_reader(connection->io_context, cti_connection_read_callback);
     connection->context = context;
@@ -195,7 +164,6 @@ cti_connection_create(void *context, cti_callback_t callback,
     *retcon = connection;
     return kCTIStatus_NoError;
 }
-
 
 cti_status_t
 cti_add_service(void *context, cti_reply_t callback, run_context_t client_queue,

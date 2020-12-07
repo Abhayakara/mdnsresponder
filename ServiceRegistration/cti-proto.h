@@ -19,7 +19,7 @@
 
 #ifndef __CTI_PROTO_H__
 #define __CTI_PROTO_H__
-#define SERVER_SOCKET_NAME "/var/run/cti-server-socket"
+#define CTI_SERVER_SOCKET_NAME "/var/run/cti-server-socket"
 
 #include <stdbool.h>
 #include "cti-common.h"
@@ -36,6 +36,7 @@ struct cti_buffer {
 #ifndef __CTI_SERVICES_H__
 typedef union {
 	void (*NONNULL callback)(void);
+	void (*NONNULL reply)(cti_connection_t NONNULL connection, void *NULLABLE result, int status);
 } cti_callback_t;
 #endif
 typedef void (*cti_internal_callback_t)(cti_connection_t NONNULL conn_ref, void *object, cti_status_t status);
@@ -51,6 +52,9 @@ struct _cti_connection_t {
 	int ref_count;
 	cti_callback_t callback;
 	cti_internal_callback_t NULLABLE internal_callback;
+	uid_t uid;
+	gid_t gid;
+	pid_t pid;
 #endif
 	int fd;
 	cti_buffer_t input, output;
@@ -89,4 +93,6 @@ bool cti_connection_message_send(cti_connection_t NONNULL connection);
 bool cti_send_response(cti_connection_t NONNULL connection, int status);
 void cti_read(cti_connection_t NONNULL connection, cti_datagram_callback_t NONNULL datagram_callback);
 cti_connection_t NULLABLE cti_connection_allocate(uint16_t expected_size);
+int cti_make_unix_socket(const char *NONNULL sockname, size_t name_size, bool is_listener);
+int cti_accept(int listen_fd, uid_t *NULLABLE p_uid, gid_t *NULLABLE p_gid, pid_t *NULLABLE p_pid);
 #endif // __CTI_PROTO_H__
