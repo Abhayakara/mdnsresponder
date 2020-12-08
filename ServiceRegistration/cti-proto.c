@@ -34,8 +34,14 @@
 #include <sys/socket.h>
 #include <sys/signal.h>
 
-#include "cti-common.h"
+#ifdef OPENTHREAD_PLATFORM_POSIX
+#include "cti-server.h"
 #include "cti-proto.h"
+#else
+#include "cti-proto.h"
+#include "cti-common.h"
+#endif
+
 
 void
 cti_connection_finalize(cti_connection_t connection)
