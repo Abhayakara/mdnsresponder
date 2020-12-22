@@ -46,6 +46,8 @@ const uint64_t thread_enterprise_number = 52627;
 
 cti_connection_t thread_service_context;
 
+static const char *interface = NULL;
+
 #define SRP_IO_CONTEXT_MAGIC 0xFEEDFACEFADEBEEFULL  // BEES!   Everybody gets BEES!
 typedef struct io_context {
     uint64_t magic_cookie1;
@@ -404,7 +406,7 @@ static void
 usage(void)
 {
     fprintf(stderr,
-            "srp-client [--lease-time <seconds>] [--client-count <client count>] [--server <address>%%<port>]\n"
+            "srp-client [--lease-time <seconds>] [--client-count <client count>] [--interface <interface name>] [--server <address>%%<port>]\n"
             "           [--random-leases] [--delete-registrations] [--use-thread-services] [--log-stderr]\n"
             "           [--bogusify-signatures]\n");
     exit(1);
@@ -422,7 +424,7 @@ cti_service_list_callback(void *UNUSED context, cti_service_vec_t *services, cti
     }
 
     srp_start_address_refresh();
-    ioloop_map_interface_addresses(services, interface_callback);
+    ioloop_map_interface_addresses(interface, services, interface_callback);
     for (i = 0; i < services->num; i++) {
         cti_service_t *cti_service = services->services[i];
         // Look for SRP service advertisements only.
@@ -469,6 +471,9 @@ main(int argc, char **argv)
         } else if (!strcmp(argv[i], "--client-count")) {
             nump = &num_clients;
             goto number;
+        } else if (!strcmp(argv[i], "--interface")) {
+            interface = argv[i+1];
+            i++;
         } else if (!strcmp(argv[i], "--server")) {
             char *percent;
             int server_port;
@@ -522,7 +527,7 @@ main(int argc, char **argv)
     }
 
     if (!use_thread_services) {
-        ioloop_map_interface_addresses(NULL, interface_callback);
+        ioloop_map_interface_addresses(interface, NULL, interface_callback);
     }
 
     if (!have_server_address && !use_thread_services) {
