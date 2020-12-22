@@ -516,7 +516,7 @@ dns_sig0_signature_to_wire_(dns_towire_state_t *NONNULL txn, srp_key_t *key, uin
 
     // 1 name (root)
     // 2 type (SIG)
-    // 2 class (0)
+    // 2 class (255) ANY
     // 4 TTL (0)
     // 18 SIG RDATA up to signer name
     // 2 signer name (always a pointer)
@@ -527,7 +527,7 @@ dns_sig0_signature_to_wire_(dns_towire_state_t *NONNULL txn, srp_key_t *key, uin
     if (!txn->error) {
         dns_u8_to_wire(txn, 0);	// root label
         dns_u16_to_wire(txn, dns_rrtype_sig);
-        dns_u16_to_wire(txn, 0); // class
+        dns_u16_to_wire(txn, dns_qclass_any); // class
         dns_ttl_to_wire(txn, 0); // SIG RR TTL
         dns_rdlength_begin(txn);
         start = txn->p;

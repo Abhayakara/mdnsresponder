@@ -20,6 +20,10 @@
 #ifndef __SRP_H
 #define __SRP_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #ifdef POSIX_BUILD
@@ -468,6 +472,11 @@ void debug_free(void *p, const char *file, int line);
 #endif
 
 typedef struct srp_key srp_key_t;
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
+
 #endif // __SRP_H
 
 // Local Variables:

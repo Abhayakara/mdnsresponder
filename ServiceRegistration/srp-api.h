@@ -19,6 +19,10 @@
 
 #include "srp.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef void (*srp_hostname_conflict_callback_t)(const char *NONNULL hostname);
 typedef void (*srp_wakeup_callback_t)(void *NONNULL state);
 typedef void (*srp_datagram_callback_t)(void *NONNULL state, void *NONNULL message, size_t message_length);
@@ -144,6 +148,10 @@ int srp_set_wakeup(void *NULLABLE host_context,
 
 // This is called to cancel a wakeup, and should not fail even if there is no wakeup pending.
 int srp_cancel_wakeup(void *NULLABLE host_context, void *NONNULL context);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 // Local Variables:
 // mode: C

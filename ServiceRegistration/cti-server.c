@@ -35,7 +35,9 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/signal.h>
-
+#ifndef LINUX
+#include <sys/ucred.h>
+#endif
 #include "cti-server.h"
 #include "cti-proto.h"
 
@@ -72,7 +74,7 @@ cti_service_add_parse(cti_connection_t connection)
     {
         dump_to_hex(service_data, service_data_length, service_data_buf, sizeof(service_data_buf));
         dump_to_hex(server_data, server_data_length, server_data_buf, sizeof(server_data_buf));
-        syslog(LOG_INFO, "cti_service_add_parse: %" PRIu32 " %zd[ %s ] %zd[ %s ]",
+        syslog(LOG_INFO, "cti_service_add_parse: %" PRIu32 " %" PRIu16 "[ %s ] %" PRIu16 "[ %s ]",
                enterprise_id, service_data_length, service_data_buf, server_data_length, server_data_buf);
 
 #ifndef POSIX_BUILD
@@ -104,7 +106,7 @@ cti_service_remove_parse(cti_connection_t connection)
         cti_connection_parse_done(connection))
     {
         dump_to_hex(service_data, service_data_length, service_data_buf, sizeof(service_data_buf));
-        syslog(LOG_INFO, "cti_service_add_parse: %" PRIu32 " %zd[ %s ]", enterprise_id, service_data_length, service_data_buf);
+        syslog(LOG_INFO, "cti_service_add_parse: %" PRIu32 " %" PRIu16 "[ %s ]", enterprise_id, service_data_length, service_data_buf);
 
 #ifndef POSIX_BUILD
         status = ctiRemoveService(enterprise_id,
@@ -272,7 +274,7 @@ cti_accept(void)
     struct sockaddr_un addr;
     socklen_t socksize = sizeof(addr);
     int fd = accept(cti_listener_fd, (struct sockaddr *)&addr, &socksize);
-    size_t len;
+    socklen_t len;
     struct ucred ucred;
 
     if (fd < 0) {

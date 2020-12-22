@@ -47,7 +47,9 @@
 #include <string.h>
 #include <ctype.h>
 #include <arpa/inet.h>
+#if USE_SYSCTL_COMMMAND_TO_ENABLE_FORWARDING
 #include <sys/sysctl.h>
+#endif
 #include <stdlib.h>
 #include <stddef.h>
 #include <dns_sd.h>
@@ -937,7 +939,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
          PUB_S_SRP "advert " /* interface->advertise_ipv6_prefix ? */
          PUB_S_SRP "conf " /* interface->on_link_prefix_configured ? */
          PUB_S_SRP "new_prefix " /* new_prefix ? */
-         "preferred = %" PRIu32 " valid = %" PRIu32 " deadline = %llu",
+         "preferred = %" PRIu32 " valid = %" PRIu32 " deadline = %" PRIu64,
          interface->name, stale_routers_exist ? "" : "!", interface->router_discovery_complete ? "" : "!",
          on_link_prefix_present ? "" : "!", interface->advertise_ipv6_prefix ? "" : "!",
          interface->on_link_prefix_configured ? "" : "!", new_prefix ? "" : "!",
@@ -1029,7 +1031,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
     // we send a few initial beacons quickly for reliability.
     if (something_changed) {
         INFO("change on " PUB_S_SRP ": " PUB_S_SRP "disco " PUB_S_SRP "present " PUB_S_SRP "advert " PUB_S_SRP
-             "conf preferred = %" PRIu32 " valid = %" PRIu32 " deadline = %llu",
+             "conf preferred = %" PRIu32 " valid = %" PRIu32 " deadline = %" PRIu64,
              interface->name, interface->router_discovery_complete ? "" : "!", on_link_prefix_present ? "" : "!",
              interface->advertise_ipv6_prefix ? "" : "!", interface->on_link_prefix_configured ? "" : "!",
              interface->preferred_lifetime,
@@ -4016,13 +4018,13 @@ partition_wait_for_prefix_settling(wakeup_callback_t callback, uint64_t now)
         partition_last_state_change >= partition_settle_start && partition_tunnel_name_is_known)
     {
         partition_settle_satisfied = true;
-        INFO("partition_wait_for_prefix_settling: satisfied after %llums.", now - partition_settle_start);
+        INFO("partition_wait_for_prefix_settling: satisfied after %" PRIu64 "ms.", now - partition_settle_start);
         return false; // means don't wait
     }
 
     // If we've waited longer than 500ms and aren't satisfied, complain, but then proceed.
     if (now - partition_settle_start >= 500) {
-        ERROR("partition_wait_for_prefix_settling: unsatisfied after %llums", now - partition_settle_start);
+        ERROR("partition_wait_for_prefix_settling: unsatisfied after %" PRIu64 "ms", now - partition_settle_start);
         partition_settle_satisfied = true; // not really, but there's always next time.
         return false; // proceed if possible.
     }
@@ -4365,7 +4367,7 @@ partition_maybe_advertise_service(void)
     lowest[1] = NULL;
 
     for (service = thread_services; service; service = service->next) {
-        int port = service->port[0] | (service->port[1] << 8);
+        int port = (service->port[0] << 8) | service->port[1];
         SEGMENTED_IPv6_ADDR_GEN_SRP(service->address, srv_addr_buf);
 
         // A service only counts if its prefix is present and its prefix id is present and matches the

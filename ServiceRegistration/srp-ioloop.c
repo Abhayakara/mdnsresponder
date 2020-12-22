@@ -576,7 +576,8 @@ main(int argc, char **argv)
             txt_data = TXTRecordGetBytesPtr(&txt);
             txt_len = TXTRecordGetLength(&txt);
         }
-        memcpy(&iport, port, 2);
+        iport = (port[0] << 8) + port[1];
+
         err = DNSServiceRegister(&sdref, 0, 0, hnbuf, "_ipps._tcp",
                                  0, 0, iport, txt_len, txt_data, register_callback, client);
         if (err != kDNSServiceErr_NoError) {
