@@ -1304,7 +1304,7 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
     //   SIG(0)
 
     message->arcount = 0;
-    dns_edns0_header_to_wire(&towire, DNS_MAX_UDP_PAYLOAD, 0, 0, 1); CH; // XRCODE = 0; VERSION = 0; DO=1
+    dns_edns0_header_to_wire(&towire, 0, 0, 0, 0); CH; // XRCODE = 0; VERSION = 0; DO=0
     dns_rdlength_begin(&towire); CH;
     dns_u16_to_wire(&towire, dns_opt_update_lease); CH;  // OPTION-CODE
     dns_edns0_option_begin(&towire); CH;                 // OPTION-LENGTH

@@ -780,7 +780,7 @@ cti_service_event_parse(cti_connection_t connection)
             cti_service_t *service = NULL;
             dump_to_hex(service_data, service_data_length, service_data_buf, sizeof(service_data_buf));
             dump_to_hex(server_data, server_data_length, server_data_buf, sizeof(server_data_buf));
-            INFO("cti_service_event_parse: %" PRIu32 " %zd[ %s ] %zd[ %s ]",
+            INFO("cti_service_event_parse: %" PRIu32 " %" PRIu16 "[ %s ] %" PRIu16 "[ %s ]",
                  enterprise_number, service_data_length, service_data_buf, server_data_length, server_data_buf);
             if (enterprise_number == THREAD_ENTERPRISE_NUMBER) {
                 if (service_data_length == 1) {
@@ -801,7 +801,7 @@ cti_service_event_parse(cti_connection_t connection)
             return;
         }
 
-        INFO("cti_service_event_parse: %d", vec->num);
+        INFO("cti_service_event_parse: %zd", vec->num);
         connection->callback.service_reply(connection, vec, kCTIStatus_NoError);
     }
 }
@@ -864,7 +864,7 @@ cti_prefix_event_parse(cti_connection_t connection)
             return;
         }
 
-        INFO("cti_prefix_event_parse: %d", vec->num);
+        INFO("cti_prefix_event_parse: %zd", vec->num);
         connection->callback.prefix_reply(connection, vec, kCTIStatus_NoError);
     }
 }
