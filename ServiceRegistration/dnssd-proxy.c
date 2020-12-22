@@ -2076,7 +2076,7 @@ main(int argc, char **argv)
         return 1;
     }
 
-    ioloop_map_interface_addresses(&served_domains, ifaddr_callback);
+    ioloop_map_interface_addresses(NULL, &served_domains, ifaddr_callback);
 
     // Set up hardwired answers
     dnssd_hardwired_setup();

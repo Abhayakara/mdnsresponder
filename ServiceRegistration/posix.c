@@ -48,7 +48,7 @@ struct interface_addr {
 interface_addr_t *interface_addresses;
 
 bool
-ioloop_map_interface_addresses(void *context, interface_callback_t callback)
+ioloop_map_interface_addresses(const char *interface, void *context, interface_callback_t callback)
 {
     struct ifaddrs *ifaddrs, *ifp;
     interface_addr_t *kept_ifaddrs = NULL, **ki_end = &kept_ifaddrs;
@@ -63,6 +63,10 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
     for (ifp = ifaddrs; ifp; ifp = ifp->ifa_next) {
         bool remove = false;
         bool keep = true;
+
+        if (interface != NULL && ifp->ifa_name != NULL && strcmp(interface, ifp->ifa_name)) {
+            continue;
+        }
 
 #ifndef LINUX
         // Check for temporary addresses, etc.

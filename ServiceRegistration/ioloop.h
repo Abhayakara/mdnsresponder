@@ -251,7 +251,7 @@ void ioloop_message_release_(message_t *NONNULL message, const char *NONNULL fil
 bool ioloop_send_multicast(comm_t *NONNULL comm, int ifindex, struct iovec *NONNULL iov, int iov_len);
 bool ioloop_send_message(comm_t *NONNULL connection, message_t *NULLABLE responding_to,
                          struct iovec *NONNULL iov, int iov_len);
-bool ioloop_map_interface_addresses(void *NULLABLE context, interface_callback_t NONNULL callback);
+bool ioloop_map_interface_addresses(const char *NULLABLE interface, void *NULLABLE context, interface_callback_t NONNULL callback);
 ssize_t ioloop_recvmsg(int sock, uint8_t *NONNULL buffer, size_t buffer_length, int *NONNULL ifindex,
                        int *NONNULL hoplimit, addr_t *NONNULL source, addr_t *NONNULL destination);
 #define ioloop_subproc_release(subproc) ioloop_subproc_release_(subproc, __FILE__, __LINE__)

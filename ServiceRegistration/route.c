@@ -2488,7 +2488,7 @@ refresh_interface_list(void)
 {
     interface_t *interface;
     bool have_active = false;
-    ioloop_map_interface_addresses(NULL, ifaddr_callback);
+    ioloop_map_interface_addresses(NULL, NULL, ifaddr_callback);
     for (interface = interfaces; interface; interface = interface->next) {
         if (!interface->ineligible && !interface->inactive) {
             have_active = true;
