@@ -53,6 +53,11 @@
 #ifndef __mDNSEmbeddedAPI_h
 #define __mDNSEmbeddedAPI_h
 
+#ifdef __MINGW32__
+// MinGW defines "#define interface struct" for ObjC compatibility.
+#undef interface
+#endif
+
 #if defined(EFI32) || defined(EFI64) || defined(EFIX64)
 // EFI doesn't have stdarg.h unless it's building with GCC.
 #include "Tiano.h"
