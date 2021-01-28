@@ -1054,7 +1054,7 @@ mDNSPlatformTCPConnect
 
 	// Setup connection data object
 
-	sock->userCallback	= inCallback;
+	sock->tcpConnectionCallback = inCallback;
 	sock->userContext	= inContext;
 
 	mDNSPlatformMemZero(&saddr, sizeof(saddr));
@@ -1220,7 +1220,7 @@ TCPSocketNotification( SOCKET sock, LPWSANETWORKEVENTS event, void *context )
 	DEBUG_UNUSED( sock );
 
 	require_action( tcpSock, exit, err = mStatus_BadParamErr );
-	callback = ( TCPConnectionCallback ) tcpSock->userCallback;
+	callback = tcpSock->tcpConnectionCallback;
 	require_action( callback, exit, err = mStatus_BadParamErr );
 
 	if ( event && ( event->lNetworkEvents & FD_CONNECT ) )
@@ -1947,9 +1947,7 @@ SetDomainFromDHCP( void )
 
 	for ( pAdapter = pAdapterInfo; pAdapter; pAdapter = pAdapter->Next )
 	{
-		if ( pAdapter->IpAddressList.IpAddress.String &&
-		     pAdapter->IpAddressList.IpAddress.String[0] &&
-		     pAdapter->GatewayList.IpAddress.String &&
+		if ( pAdapter->IpAddressList.IpAddress.String[0] &&
 		     pAdapter->GatewayList.IpAddress.String[0] &&
 		     ( !index || ( pAdapter->Index == index ) ) )
 		{
@@ -2041,9 +2039,7 @@ mDNSPlatformGetPrimaryInterface( mDNSAddr * v4, mDNSAddr * v6, mDNSAddr * router
 
 	for ( pAdapter = pAdapterInfo; pAdapter; pAdapter = pAdapter->Next )
 	{
-		if ( pAdapter->IpAddressList.IpAddress.String &&
-		     pAdapter->IpAddressList.IpAddress.String[0] &&
-		     pAdapter->GatewayList.IpAddress.String &&
+		if ( pAdapter->IpAddressList.IpAddress.String[0] &&
 		     pAdapter->GatewayList.IpAddress.String[0] &&
 		     ( StringToAddress( v4, pAdapter->IpAddressList.IpAddress.String ) == mStatus_NoError ) &&
 		     ( StringToAddress( router, pAdapter->GatewayList.IpAddress.String ) == mStatus_NoError ) &&

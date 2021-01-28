@@ -2020,7 +2020,7 @@ UDSReadNotification( SOCKET sock, LPWSANETWORKEVENTS event, void *context )
 
 	if ( tcpSock )
 	{
-		tcpSock->userCallback( ( int ) tcpSock->fd, tcpSock->userContext );
+		tcpSock->udsEventCallback( ( int ) tcpSock->fd, tcpSock->userContext );
 	}
 }
 
@@ -2047,7 +2047,7 @@ udsSupportAddFDToEventLoop( SocketRef fd, udsEventCallback callback, void *conte
 		mDNSPlatformMemZero( sock, sizeof( TCPSocket ) );
 
 		sock->fd				= (SOCKET) fd;
-		sock->userCallback		= callback;
+		sock->udsEventCallback	= callback;
 		sock->userContext		= context;
 		sock->m					= &gMDNSRecord;
 
