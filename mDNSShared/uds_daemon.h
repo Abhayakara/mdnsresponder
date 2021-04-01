@@ -79,8 +79,13 @@ typedef struct browser_t
 } browser_t;
 
 #ifdef _WIN32
+#ifdef __MINGW32__
+typedef int pid_t;
+typedef int socklen_t;
+#else
 typedef unsigned int pid_t;
 typedef unsigned int socklen_t;
+#endif
 #endif
 
 #if (!defined(MAXCOMLEN))
