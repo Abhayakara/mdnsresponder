@@ -47,9 +47,9 @@ BEGIN
             VALUE "CompanyName", MASTER_COMPANY_NAME
             VALUE "FileDescription", "Bonjour Service"
             VALUE "FileVersion", MASTER_PROD_VERS_STR
-            VALUE "InternalName", "mDNSResponder.exe"
+            VALUE "InternalName", MDNSRESPONDER_FILENAME
             VALUE "LegalCopyright", MASTER_LEGAL_COPYRIGHT
-            VALUE "OriginalFilename", "mDNSResponder.exe"
+            VALUE "OriginalFilename", MDNSRESPONDER_FILENAME
             VALUE "ProductName", MASTER_PROD_NAME
             VALUE "ProductVersion", MASTER_PROD_VERS_STR
         END

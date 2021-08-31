@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2018-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,9 +32,8 @@
 #include "mDNSMacOSX.h"
 #endif
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, RESOLVED_SYMPTOM)
+#if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
 #include "resolved_cache.h"
-#include <os/feature_private.h>
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, UNREADY_INTERFACES)
@@ -66,7 +65,6 @@ mDNSBool AlwaysAppendSearchDomains = mDNSfalse;
 // Control enabling optimistic DNS - Phil
 mDNSBool EnableAllowExpired = mDNStrue;
 
-
 typedef struct
 {
     mDNSu32                 requestID;
@@ -81,14 +79,20 @@ typedef struct
     const mDNSu8 *          effectiveUUID;
     mDNSu32                 peerUID;
     mDNSBool                isInAppBrowserRequest;
+    mDNSBool                useAAAAFallback;
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     const mDNSu8 *          resolverUUID;
 	mdns_dns_service_id_t	customID;
     mDNSBool                needEncryption;
+    mDNSBool                useFailover;
+    mDNSBool                failoverMode;
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
     const audit_token_t *   peerAuditToken;
     const audit_token_t *   delegatorAuditToken;
+#endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+    dnssd_log_privacy_level_t logPrivacyLevel;
 #endif
 
 }   QueryRecordOpParams;
@@ -147,7 +151,7 @@ mDNSexport mStatus GetAddrInfoClientRequestStart(GetAddrInfoClientRequest *inReq
         goto exit;
     }
 
-    if (inParams->protocols & ~(kDNSServiceProtocol_IPv4|kDNSServiceProtocol_IPv6))
+    if (inParams->protocols & ~((mDNSu32)(kDNSServiceProtocol_IPv4|kDNSServiceProtocol_IPv6)))
     {
         err = mStatus_BadParamErr;
         goto exit;
@@ -204,12 +208,18 @@ mDNSexport mStatus GetAddrInfoClientRequestStart(GetAddrInfoClientRequest *inReq
     opParams.resolverUUID           = inParams->resolverUUID;
     opParams.customID               = inParams->customID;
     opParams.needEncryption         = inParams->needEncryption;
+    opParams.useFailover            = inParams->useFailover;
+    opParams.failoverMode           = inParams->failoverMode;
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
     opParams.peerAuditToken         = inParams->peerAuditToken;
     opParams.delegatorAuditToken    = inParams->delegatorAuditToken;
     opParams.isInAppBrowserRequest  = inParams->isInAppBrowserRequest;
 #endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+    opParams.logPrivacyLevel        = inParams->logPrivacyLevel;
+#endif
+
     if (inRequest->protocols & kDNSServiceProtocol_IPv6)
     {
         err = QueryRecordOpCreate(&inRequest->op6);
@@ -355,12 +365,19 @@ mDNSexport mStatus QueryRecordClientRequestStart(QueryRecordClientRequest *inReq
     opParams.resolverUUID           = inParams->resolverUUID;
     opParams.customID               = inParams->customID;
     opParams.needEncryption         = inParams->needEncryption;
+    opParams.useFailover            = inParams->useFailover;
+    opParams.failoverMode           = inParams->failoverMode;
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
     opParams.peerAuditToken         = inParams->peerAuditToken;
     opParams.delegatorAuditToken    = inParams->delegatorAuditToken;
     opParams.isInAppBrowserRequest  = inParams->isInAppBrowserRequest;
 #endif
+    opParams.useAAAAFallback        = inParams->useAAAAFallback;
+#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+    opParams.logPrivacyLevel        = inParams->logPrivacyLevel;
+#endif
+
     {
         // Clear DNSSEC flag since the current query cannot be validated with DNSSEC or the user does not enable it.
         opParams.flags &= (~kDNSServiceFlagsEnableDNSSEC);
@@ -449,10 +466,16 @@ mDNSlocal mStatus QueryRecordOpStart(QueryRecordOp *inOp, const QueryRecordOpPar
     }
     mDNSPlatformMemCopy(inOp->qname, inParams->qname, len);
 
-    inOp->interfaceID   = inParams->interfaceID;
-    inOp->reqID         = inParams->requestID;
-    inOp->resultHandler = inResultHandler;
-    inOp->resultContext = inResultContext;
+    inOp->interfaceID     = inParams->interfaceID;
+    inOp->reqID           = inParams->requestID;
+    inOp->resultHandler   = inResultHandler;
+    inOp->resultContext   = inResultContext;
+    inOp->useAAAAFallback = inParams->useAAAAFallback;
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+    inOp->useFailover     = inParams->useFailover;
+    inOp->failoverMode    = inParams->failoverMode;
+    inOp->qtype           = inParams->qtype;
+#endif
 
     // Set up DNSQuestion.
 
@@ -476,12 +499,6 @@ mDNSlocal mStatus QueryRecordOpStart(QueryRecordOp *inOp, const QueryRecordOpPar
         q->delegateAuditToken = *inParams->delegatorAuditToken;
     }
 #endif
-#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
-    if (inParams->resolverUUID)
-    {
-        mDNSPlatformMemCopy(q->ResolverUUID, inParams->resolverUUID, UUID_SIZE);
-    }
-#endif
     q->InterfaceID          = inParams->interfaceID;
     q->flags                = inParams->flags;
     AssignDomainName(&q->qname, inParams->qname);
@@ -497,8 +514,25 @@ mDNSlocal mStatus QueryRecordOpStart(QueryRecordOp *inOp, const QueryRecordOpPar
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     q->RequireEncryption    = inParams->needEncryption;
     q->CustomID             = inParams->customID;
+    if (inOp->failoverMode)
+    {
+        q->IsFailover = mDNStrue;
+        // Force a path evaluation if the DNSQuestion isn't interface-scoped.
+        if (!q->InterfaceID)
+        {
+            q->ForcePathEval = mDNStrue;
+        }
+    }
+    else if (inParams->resolverUUID)
+    {
+        mDNSPlatformMemCopy(q->ResolverUUID, inParams->resolverUUID, UUID_SIZE);
+    }
 #endif
     q->InitialCacheMiss     = mDNSfalse;
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+    q->logPrivacyLevel      = inParams->logPrivacyLevel;
+#endif
 
 
     q->pid              = inParams->effectivePID;
@@ -681,11 +715,45 @@ mDNSlocal void QueryRecordOpCallback(mDNS *m, DNSQuestion *inQuestion, const Res
                     goto exit;
                 }
             }
+            if (op->useAAAAFallback && (inQuestion->qtype == kDNSType_AAAA) && (inAnswer->rcode != kDNSFlag1_RC_NXDomain))
+            {
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG,
+                    "[R%u] Restarting question for " PRI_DM_NAME " AAAA record as question for A record (RCODE %d)",
+                    op->reqID, DM_NAME_PARAM(&inQuestion->qname), inAnswer->rcode);
+                QueryRecordOpStopQuestion(inQuestion);
+                inQuestion->qtype = kDNSType_A;
+                QueryRecordOpStartQuestion(op, inQuestion);
+                goto exit;
+            }
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+            if (op->useFailover && !inQuestion->IsFailover && inQuestion->dnsservice &&
+                mdns_dns_service_allows_failover(inQuestion->dnsservice))
+            {
+                QueryRecordOpStopQuestion(inQuestion);
+                inQuestion->qtype = op->qtype; // Ensure that the original QTYPE is used in case AAAA fallback was used.
+                inQuestion->IsFailover = mDNStrue;
+                // Force a path evaluation if the DNSQuestion isn't interface-scoped.
+                if (!inQuestion->InterfaceID)
+                {
+                    inQuestion->ForcePathEval = mDNStrue;
+                }
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG,
+                    "[R%u] Restarting question for " PRI_DM_NAME " (" PUB_S ") due to DNS service failover",
+                    op->reqID, DM_NAME_PARAM(&inQuestion->qname), DNSTypeName(inQuestion->qtype));
+                domain = mDNSNULL;
+                if (inQuestion->AppendSearchDomains)
+                {
+                    op->searchListIndex = 0; // Reset search list usage
+                    domain = NextSearchDomain(op);
+                }
+                QueryRecordOpRestartUnicastQuestion(op, inQuestion, domain);
+                goto exit;
+            }
+#endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_DOTLOCAL)
             if (!inAnswer->InterfaceID && IsLocalDomain(inAnswer->name))
             {
-                if ((RecordTypeIsAddress(inQuestion->qtype) &&
-                    (inAnswer->negativeRecordType == kNegativeRecordType_NoData)) ||
+                if ((RecordTypeIsAddress(inQuestion->qtype) && (inAnswer->rcode == kDNSFlag1_RC_NoErr)) ||
                     DomainNameIsInSearchList(&inQuestion->qname, mDNStrue))
                 {
                     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
@@ -713,46 +781,41 @@ mDNSlocal void QueryRecordOpCallback(mDNS *m, DNSQuestion *inQuestion, const Res
     }
 #endif
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, RESOLVED_SYMPTOM)
-    if (os_feature_enabled(symptomsd, networking_transparency)  &&
+#if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
+    if (resolved_cache_is_enabled()                             &&
         inAddRecord                                             &&
         !mDNSOpaque16IsZero(inQuestion->TargetQID)              &&
         !LocalOnlyOrP2PInterface(inAnswer->InterfaceID)         &&
         inAnswer->RecordType != kDNSRecordTypePacketNegative    &&
-        ((inAnswer->rrtype == kDNSServiceType_CNAME)    ||
-         (inAnswer->rrtype == kDNSServiceType_A)        ||
+        ((inAnswer->rrtype == kDNSServiceType_A)        ||
          (inAnswer->rrtype == kDNSServiceType_AAAA)))
     {
-        if (inQuestion->CNAMEReferrals == 0)
+        const void *data_ptr;
+        if (inAnswer->rrtype == kDNSServiceType_A)
         {
-            resolved_cache_append_name((uintptr_t)inQuestion, inAnswer->name);
+            data_ptr = inAnswer->rdata->u.ipv4.b;
         }
-
-        if (inAnswer->rrtype == kDNSServiceType_CNAME)
+        else if (inAnswer->rrtype == kDNSServiceType_AAAA)
         {
-            resolved_cache_append_name((uintptr_t)inQuestion, &inAnswer->rdata->u.name);
+            data_ptr = inAnswer->rdata->u.ipv6.b;
         }
-        else
-        {
-            const void *data_ptr;
-            if (inAnswer->rrtype == kDNSServiceType_A)
-            {
-                data_ptr = inAnswer->rdata->u.ipv4.b;
-            }
-            else if (inAnswer->rrtype == kDNSServiceType_AAAA)
-            {
-                data_ptr = inAnswer->rdata->u.ipv6.b;
-            }
-            resolved_cache_append_address((uintptr_t)inQuestion, inAnswer->rrtype, data_ptr);
-        }
+        resolved_cache_append_address(inQuestion, inAnswer->rrtype, data_ptr);
     }
 #endif
 
+    // The result handler is allowed to stop the client request, so it's not safe to touch the DNSQuestion or
+    // the QueryRecordOp unless m->CurrentQuestion still points to this DNSQuestion.
+#if MDNSRESPONDER_SUPPORTS(APPLE, WEB_CONTENT_FILTER)
+    const uid_t euid = inQuestion->euid;
+#endif
     if (op->resultHandler) op->resultHandler(m, inQuestion, inAnswer, inAddRecord, resultErr, op->resultContext);
-    if (resultErr == kDNSServiceErr_Timeout) QueryRecordOpStopQuestion(inQuestion);
+    if (m->CurrentQuestion == inQuestion)
+    {
+        if (resultErr == kDNSServiceErr_Timeout) QueryRecordOpStopQuestion(inQuestion);
+    }
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, WEB_CONTENT_FILTER)
-    NotifyWebContentFilter(inAnswer, inQuestion->euid);
+    NotifyWebContentFilter(inAnswer, euid);
 #endif
 
 exit:
@@ -795,11 +858,8 @@ mDNSlocal mStatus QueryRecordOpStopQuestion(DNSQuestion *inQuestion)
 {
     mStatus     err;
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, RESOLVED_SYMPTOM)
-    if (os_feature_enabled(symptomsd, networking_transparency))
-    {
-        resolved_cache_delete((uintptr_t)inQuestion);
-    }
+#if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
+    resolved_cache_delete(inQuestion);
 #endif
     err = mDNS_StopQuery(&mDNSStorage, inQuestion);
     inQuestion->QuestionContext = mDNSNULL;

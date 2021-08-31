@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2015-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,10 @@
 
 #include <dns_sd.h>
 
+
+    #define DNS_SD_ENUM_SPI_AVAILABLE(...)
+
+#define DNS_SD_ENUM_SPI_AVAILABLE_FALL_2021 DNS_SD_ENUM_SPI_AVAILABLE(macos(12.0), ios(15.0), tvos(15.0), watchos(8.0))
 
 // Private flags (kDNSServiceFlagsPrivateOne, kDNSServiceFlagsPrivateTwo, kDNSServiceFlagsPrivateThree, kDNSServiceFlagsPrivateFour, kDNSServiceFlagsPrivateFive) from dns_sd.h
 enum
@@ -53,6 +57,18 @@ enum
      * When set, it indicates that Network PathEvaluation has already been performed.
      */
 };
+
+typedef enum
+{
+    kDNSServiceAAAAPolicyNone     DNS_SD_ENUM_SPI_AVAILABLE_FALL_2021 = 0,
+    kDNSServiceAAAAPolicyFallback DNS_SD_ENUM_SPI_AVAILABLE_FALL_2021 = 1  // If AAAA record doesn't exist, query for A.
+} DNSServiceAAAAPolicy;
+
+typedef enum
+{
+    kDNSServiceFailoverPolicyNone  DNS_SD_ENUM_SPI_AVAILABLE_FALL_2021 = 0,
+    kDNSServiceFailoverPolicyAllow DNS_SD_ENUM_SPI_AVAILABLE_FALL_2021 = 1
+} DNSServiceFailoverPolicy;
 
 
 #define kDNSServiceCompPrivateDNS   "PrivateDNS"

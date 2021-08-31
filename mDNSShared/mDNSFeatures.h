@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -39,6 +39,18 @@
         #define MDNSRESPONDER_SUPPORTS_COMMON_DNS_PUSH      1
     #else
         #define MDNSRESPONDER_SUPPORTS_COMMON_DNS_PUSH      0
+    #endif
+#endif
+
+// Feature: Use Multicast DNS to discover the local DNS server that is authoritative for a given domain.
+// Radar:   <rdar://69957139>
+// Enabled: No
+
+#if !defined(MDNSRESPONDER_SUPPORTS_COMMON_LOCAL_DNS_RESOLVER_DISCOVERY)
+    #if MDNSRESPONDER_PLATFORM_APPLE
+        #define MDNSRESPONDER_SUPPORTS_COMMON_LOCAL_DNS_RESOLVER_DISCOVERY 1
+    #else
+        #define MDNSRESPONDER_SUPPORTS_COMMON_LOCAL_DNS_RESOLVER_DISCOVERY 0
     #endif
 #endif
 

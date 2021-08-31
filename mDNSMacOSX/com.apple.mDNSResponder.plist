@@ -10,6 +10,8 @@
 	<string>_mdnsresponder</string>
 	<key>GroupName</key>
 	<string>_mdnsresponder</string>
+	<key>LimitLoadToSessionType</key>
+	<string>System</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>/usr/sbin/mDNSResponder</string>

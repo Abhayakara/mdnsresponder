@@ -93,23 +93,17 @@
   <PropertyGroup>
     <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(Platform)\$(Configuration)\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</LinkIncremental>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\</OutDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(Platform)\$(Configuration)\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</LinkIncremental>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(Platform)\$(Configuration)\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</LinkIncremental>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\</OutDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">$(Platform)\$(Configuration)\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">false</LinkIncremental>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -125,9 +119,7 @@
       <BufferSecurityCheck>true</BufferSecurityCheck>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <WarningLevel>Level4</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CallingConvention>StdCall</CallingConvention>
     </ClCompile>
     <ResourceCompile>
@@ -135,15 +127,10 @@
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/NXCOMPAT /DYNAMICBASE /SAFESEH %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>../DLL/$(Platform)/$(Configuration)/dnssd.lib;ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <OutputFile>$(OutDir)mdnsNSP.dll</OutputFile>
+      <AdditionalDependencies>ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>mdnsNSP.def</ModuleDefinitionFile>
       <DelayLoadDLLs>dnssd.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(OutDir)mdnsNSP.pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
-      <BaseAddress>0x64000000</BaseAddress>
-      <ImportLibrary>$(OutDir)mdnsNSP.lib</ImportLibrary>
       <TargetMachine>MachineX86</TargetMachine>
     </Link>
   </ItemDefinitionGroup>
@@ -164,9 +151,7 @@
       <BufferSecurityCheck>true</BufferSecurityCheck>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <WarningLevel>Level4</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CallingConvention>StdCall</CallingConvention>
     </ClCompile>
     <ResourceCompile>
@@ -174,15 +159,10 @@
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/NXCOMPAT /DYNAMICBASE %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>../DLL/$(Platform)/$(Configuration)/dnssd.lib;ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <OutputFile>$(OutDir)mdnsNSP.dll</OutputFile>
+      <AdditionalDependencies>ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>mdnsNSP.def</ModuleDefinitionFile>
       <DelayLoadDLLs>dnssd.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(OutDir)mdnsNSP.pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
-      <BaseAddress>0x64000000</BaseAddress>
-      <ImportLibrary>$(OutDir)mdnsNSP.lib</ImportLibrary>
       <TargetMachine>MachineX64</TargetMachine>
     </Link>
   </ItemDefinitionGroup>
@@ -201,23 +181,17 @@
       <BufferSecurityCheck>true</BufferSecurityCheck>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <WarningLevel>Level4</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>../;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/NXCOMPAT /DYNAMICBASE %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>../DLL/$(Platform)/$(Configuration)/dnssd.lib;ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <OutputFile>$(OutDir)mdnsNSP.dll</OutputFile>
+      <AdditionalDependencies>ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>mdnsNSP.def</ModuleDefinitionFile>
       <DelayLoadDLLs>dnssd.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(OutDir)mdnsNSP.pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
-      <ImportLibrary>$(OutDir)mdnsNSP.lib</ImportLibrary>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -232,9 +206,7 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <WarningLevel>Level4</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CallingConvention>StdCall</CallingConvention>
     </ClCompile>
     <ResourceCompile>
@@ -242,28 +214,16 @@
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/NXCOMPAT /DYNAMICBASE /SAFESEH %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>../DLL/$(Platform)/$(Configuration)/dnssd.lib;ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <OutputFile>$(OutDir)mdnsNSP.dll</OutputFile>
+      <AdditionalDependencies>ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>mdnsNSP.def</ModuleDefinitionFile>
       <DelayLoadDLLs>dnssd.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(IntDir)$(ProjectName).pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>
       </OptimizeReferences>
       <EnableCOMDATFolding>
       </EnableCOMDATFolding>
-      <BaseAddress>0x64000000</BaseAddress>
-      <ImportLibrary>$(IntDir)mdnsNSP.lib</ImportLibrary>
       <TargetMachine>MachineX86</TargetMachine>
     </Link>
-    <PostBuildEvent>
-      <Command>if not "%RC_XBS%" == "YES" goto END
-if not exist "$(DSTROOT)\Program Files\Bonjour\$(Platform)"   mkdir "$(DSTROOT)\Program Files\Bonjour\$(Platform)"
-xcopy /I/Y "$(TargetPath)"                                                                  "$(DSTROOT)\Program Files\Bonjour\$(Platform)"
-:END
-</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Midl>
@@ -280,9 +240,7 @@ xcopy /I/Y "$(TargetPath)"                                                      
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <WarningLevel>Level4</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CallingConvention>StdCall</CallingConvention>
     </ClCompile>
     <ResourceCompile>
@@ -290,28 +248,16 @@ xcopy /I/Y "$(TargetPath)"                                                      
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/NXCOMPAT /DYNAMICBASE %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>../DLL/$(Platform)/$(Configuration)/dnssd.lib;ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <OutputFile>$(OutDir)mdnsNSP.dll</OutputFile>
+      <AdditionalDependencies>ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>mdnsNSP.def</ModuleDefinitionFile>
       <DelayLoadDLLs>dnssd.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(IntDir)$(ProjectName).pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>
       </OptimizeReferences>
       <EnableCOMDATFolding>
       </EnableCOMDATFolding>
-      <BaseAddress>0x64000000</BaseAddress>
-      <ImportLibrary>$(IntDir)mdnsNSP.lib</ImportLibrary>
       <TargetMachine>MachineX64</TargetMachine>
     </Link>
-    <PostBuildEvent>
-      <Command>if not "%RC_XBS%" == "YES" goto END
-if not exist "$(DSTROOT)\Program Files\Bonjour\$(Platform)"   mkdir "$(DSTROOT)\Program Files\Bonjour\$(Platform)"
-xcopy /I/Y "$(TargetPath)"                                                                  "$(DSTROOT)\Program Files\Bonjour\$(Platform)"
-:END
-</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <Midl />
@@ -326,35 +272,22 @@ xcopy /I/Y "$(TargetPath)"                                                      
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <WarningLevel>Level4</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>../;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/NXCOMPAT /DYNAMICBASE %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>../DLL/$(Platform)/$(Configuration)/dnssd.lib;ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <OutputFile>$(OutDir)mdnsNSP.dll</OutputFile>
+      <AdditionalDependencies>ws2_32.lib;iphlpapi.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>mdnsNSP.def</ModuleDefinitionFile>
       <DelayLoadDLLs>dnssd.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(IntDir)$(ProjectName).pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>
       </OptimizeReferences>
       <EnableCOMDATFolding>
       </EnableCOMDATFolding>
-      <ImportLibrary>$(IntDir)mdnsNSP.lib</ImportLibrary>
     </Link>
-    <PostBuildEvent>
-      <Command>if not "%RC_XBS%" == "YES" goto END
-if not exist "$(DSTROOT)\Program Files\Bonjour\$(Platform)"   mkdir "$(DSTROOT)\Program Files\Bonjour\$(Platform)"
-xcopy /I/Y "$(TargetPath)"                                                                  "$(DSTROOT)\Program Files\Bonjour\$(Platform)"
-:END
-</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\Clients\ClientCommon.c" />
@@ -377,10 +310,10 @@ xcopy /I/Y "$(TargetPath)"                                                      
   <ItemGroup>
     <ProjectReference Include="..\DLL\dnssd.vcxproj">
       <Project>{ab581101-18f0-46f6-b56a-83a6b1ea657e}</Project>
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Import Project="..\XBS.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>

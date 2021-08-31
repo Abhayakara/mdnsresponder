@@ -54,7 +54,7 @@ srp_load_file_data(void *host_context, const char *filename, uint8_t *buffer, ui
         close(file);
         return false;
     }
-    len = read(file, buffer, flen);
+    len = read(file, buffer, (size_t)flen); // Note: flen always positive, no loss of precision.
     if (len < 0 || len != flen) {
         if (len < 0) {
             ERROR("srp_load_file_data: %s: read: %s", filename, strerror(errno));

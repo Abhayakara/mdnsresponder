@@ -1,12 +1,12 @@
 /* route.h
  *
- * Copyright (c) 2019-2020 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,11 +27,8 @@
 #endif
 
 #define MIN_DELAY_BETWEEN_RAS 4000
-#define MSEC_PER_SEC (NSEC_PER_SEC / NSEC_PER_MSEC)
 #define MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE 600 * MSEC_PER_SEC
 
-#define NSEC_PER_SEC  1000000000ull
-#define NSEC_PER_MSEC    1000000ull
 
 #ifndef RTR_SOLICITATION_INTERVAL
 #define RTR_SOLICITATION_INTERVAL       4       /* 4sec */
@@ -66,6 +63,9 @@ struct interface {
 
     // Wakeup event to detect that vicarious router discovery is complete
     wakeup_t *NULLABLE vicarious_discovery_complete;
+
+    // Wakeup event to periodically notice whether routers we have heard previously on this interface have gone stale.
+    wakeup_t *NULLABLE stale_evaluation_wakeup;
 
     // List of ICMP messages from different routers.
     icmp_message_t *NULLABLE routers;
@@ -207,9 +207,8 @@ struct icmp_message {
     icmp_message_t *NULLABLE next;
     interface_t *NULLABLE interface;
     icmp_option_t *NULLABLE options;
-    bool new_router;                // If this router information is a newly recevied one.
-    bool received_time_already_adjusted;    // if the received time of the message is already adjusted by
-                                                    // vicarious mode
+    bool new_router;                     // If this router information is a newly recevied one.
+    bool received_time_already_adjusted; // if the received time of the message is already adjusted by vicarious mode
     struct in6_addr source;
     struct in6_addr destination;
 
@@ -245,6 +244,8 @@ void thread_network_startup(void);
 void thread_network_shutdown(void);
 void partition_stop_advertising_pref_id(void);
 void partition_start_srp_listener(void);
+void partition_publish_my_prefix(void);
+void partition_discontinue_srp_service(void);
 #endif // __SERVICE_REGISTRATION_ROUTE_H
 
 // Local Variables:

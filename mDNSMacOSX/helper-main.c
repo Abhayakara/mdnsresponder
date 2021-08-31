@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@
 #include <Security/Security.h>
 #include "helper.h"
 #include "helper-server.h"
+#include "helper/server.h"
 #include <xpc/private.h>
 
 #if TARGET_OS_IPHONE
@@ -46,8 +47,6 @@
 #define launch_data_get_machport launch_data_get_fd
 #endif
 
-
-int mDNSHelperLogEnabled = 0;
 os_log_t  log_handle = NULL;
 
 static dispatch_queue_t xpc_queue = NULL;
@@ -160,40 +159,6 @@ static int initialize_timer()
     return err;
 }
 
-/* 
- Reads the user's program arguments for mDNSResponderHelper
- For now we have only one option: mDNSHelperDebugLogging which is used to turn on mDNSResponderHelperLogging
- 
- To turn ON mDNSResponderHelper Verbose Logging,
- 1] sudo defaults write /Library/Preferences/com.apple.mDNSResponderHelper.plist mDNSHelperDebugLogging -bool YES
- 2] sudo reboot
- 
- To turn OFF mDNSResponderHelper Logging,
- 1] sudo defaults delete /Library/Preferences/com.apple.mDNSResponderHelper.plist
-
- To view the current options set,
- 1] plutil -p /Library/Preferences/com.apple.mDNSResponderHelper.plist
- OR
- 1] sudo defaults read /Library/Preferences/com.apple.mDNSResponderHelper.plist
-*/
-
-static mDNSBool HelperPrefsGetValueBool(CFStringRef key, mDNSBool defaultVal)
-{
-    CFBooleanRef boolean;
-    mDNSBool result = defaultVal;
-    
-    boolean = CFPreferencesCopyAppValue(key, kmDNSHelperProgramArgs);
-    if (boolean != NULL)
-    {
-        if (CFGetTypeID(boolean) == CFBooleanGetTypeID())
-            result = CFBooleanGetValue(boolean) ? mDNStrue : mDNSfalse;
-        CFRelease(boolean);
-    }
-    
-    return result;
-}
-
-
 // Verify Client's Entitlement
 static mDNSBool check_entitlement(xpc_connection_t conn, const char *password)
 {
@@ -237,15 +202,9 @@ static void handle_request(xpc_object_t req)
    
     switch (helper_mode)
     {
-        case bpf_request:
-        {
-            os_log_info(log_handle, "Calling new RequestBPF()");
-            RequestBPF();
-            break;
-        }
-            
         case set_name:
         {
+#if MDNSRESPONDER_HELPER_NOTIFIES_USER_OF_NAME_CHANGES
             const char *old_name;
             const char *new_name;
             int pref_key = 0;
@@ -256,29 +215,17 @@ static void handle_request(xpc_object_t req)
             
             os_log_info(log_handle, "Calling new SetName() oldname: %s newname: %s key:%d", old_name, new_name, pref_key);
             PreferencesSetName(pref_key, old_name, new_name);
-            break;
-        }
-            
-        case user_notify:
-        {
-            const char *title;
-            const char *msg;
-            title = xpc_dictionary_get_string(req, "notify_title");
-            msg   = xpc_dictionary_get_string(req, "notify_msg");
-            
-            os_log_info(log_handle,"Calling new UserNotify() title:%s msg:%s", title, msg);
-            UserNotify(title, msg);
+#else
+            os_log_error(log_handle, "mDNSResponderHelper does not notify users of name changes on this OS");
+            error_code = kHelperErr_UndefinedMode;
+#endif
             break;
         }
             
         case power_req:
         {
-            int key, interval;
-            key        = xpc_dictionary_get_uint64(req, "powerreq_key");
-            interval   = xpc_dictionary_get_uint64(req, "powerreq_interval");
-            
-            os_log_info(log_handle,"Calling new PowerRequest() key[%d] interval[%d]", key, interval);
-            PowerRequest(key, interval, &error_code);
+            os_log_info(log_handle,"Calling new PowerSleepSystem()");
+            error_code = PowerSleepSystem();
             break;
         }
             
@@ -302,11 +249,12 @@ static void handle_request(xpc_object_t req)
             
         case set_localaddr_cacheentry:
         {
-            int if_index, family;
+            uint32_t if_index;
+            int family;
             size_t ip_len, eth_len;
 
-            if_index = xpc_dictionary_get_uint64(req, "slace_ifindex");
-            family   = xpc_dictionary_get_uint64(req, "slace_family");
+            if_index = (uint32_t)xpc_dictionary_get_uint64(req, "slace_ifindex");
+            family   = (int)xpc_dictionary_get_uint64(req, "slace_family");
 
             const uint8_t * const ip = (const uint8_t *)xpc_dictionary_get_data(req, "slace_ip", &ip_len);
             if (ip_len != sizeof(v6addr_t))
@@ -334,11 +282,11 @@ static void handle_request(xpc_object_t req)
             uint32_t seq, ack;
             size_t sadd6_len, dadd6_len;
             
-            lport = xpc_dictionary_get_uint64(req, "send_keepalive_lport");
-            rport = xpc_dictionary_get_uint64(req, "send_keepalive_rport");
-            seq   = xpc_dictionary_get_uint64(req, "send_keepalive_seq");
-            ack   = xpc_dictionary_get_uint64(req, "send_keepalive_ack");
-            win   = xpc_dictionary_get_uint64(req, "send_keepalive_win");
+            lport = (uint16_t)xpc_dictionary_get_uint64(req, "send_keepalive_lport");
+            rport = (uint16_t)xpc_dictionary_get_uint64(req, "send_keepalive_rport");
+            seq   = (uint32_t)xpc_dictionary_get_uint64(req, "send_keepalive_seq");
+            ack   = (uint32_t)xpc_dictionary_get_uint64(req, "send_keepalive_ack");
+            win   = (uint16_t)xpc_dictionary_get_uint64(req, "send_keepalive_win");
             
             const uint8_t * const sadd6 = (const uint8_t *)xpc_dictionary_get_data(req, "send_keepalive_sadd", &sadd6_len);
             const uint8_t * const dadd6 = (const uint8_t *)xpc_dictionary_get_data(req, "send_keepalive_dadd", &dadd6_len);
@@ -424,7 +372,11 @@ static void accept_client(xpc_connection_t conn)
         if (type == XPC_TYPE_DICTIONARY)
         {
             os_log_info(log_handle,"accept_client:conn:[%p] client[%d](mDNSResponder) requesting service", (void *) conn, c_pid);
-            handle_request(req_msg);
+            const bool handled = mhs_handle_client_message(req_msg);
+            if (!handled)
+            {
+                handle_request(req_msg);
+            }
         }
         else // We hit this case ONLY if Client Terminated Connection OR Crashed
         {
@@ -479,6 +431,7 @@ static void init_helper_service(const char *service_name)
 
 int main(int ac, char *av[])
 {
+    mhs_prologue();
     char *p = NULL;
     long n;
     int ch;
@@ -497,7 +450,7 @@ int main(int ac, char *av[])
                     fprintf(stderr, "Invalid idle timeout: %s\n", optarg);
                     exit(EXIT_FAILURE);
                 }
-                maxidle = n;
+                maxidle = (unsigned long)n;
                 break;
             case '?':
             default:
@@ -512,12 +465,6 @@ int main(int ac, char *av[])
 
     initialize_logging();
     initialize_id();
-
-    mDNSHelperLogEnabled = HelperPrefsGetValueBool(kPreferencesKey_mDNSHelperLog, mDNSHelperLogEnabled);
-
-// Currently on Fuji/Whitetail releases we are keeping the logging always enabled.
-// Hence mDNSHelperLogEnabled is set to true below by default.
-    mDNSHelperLogEnabled      = 1;
 
     os_log_info(log_handle,"mDNSResponderHelper Starting to run");
 
@@ -564,5 +511,8 @@ const char VersionString_SCCS[] = "@(#) mDNSResponderHelper " STRINGIFY(mDNSResp
 #if _BUILDING_XCODE_PROJECT_
 // If the process crashes, then this string will be magically included in the automatically-generated crash log
 const char *__crashreporter_info__ = VersionString_SCCS + 5;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlanguage-extension-token"
 asm (".desc ___crashreporter_info__, 0x10");
+#pragma clang diagnostic pop
 #endif

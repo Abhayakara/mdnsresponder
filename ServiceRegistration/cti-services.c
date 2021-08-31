@@ -1,6 +1,6 @@
 /* cti-services.c
  *
- * Copyright (c) 2020 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2020-2021 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,8 +36,6 @@
 
 static void cti_message_parse(cti_connection_t connection);
 
-#define THREAD_SERVICE_SEND_BOTH 1
-
 
 //*************************************************************************************************************
 // Globals
@@ -50,7 +48,7 @@ static void
 cti_internal_reply_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
     cti_reply_t callback;
-    INFO("cti_internal_reply_callback: conn_ref = %p", conn_ref);
+    INFO("conn_ref = %p", conn_ref);
     callback = conn_ref->callback.reply;
     if (callback != NULL) {
         callback(conn_ref->context, status);
@@ -97,7 +95,7 @@ cti_response_parse(cti_connection_t connection)
         cti_connection_i32_parse(connection, &status) &&
         cti_connection_parse_done(connection))
     {
-        INFO("cti_response_parse: %d %d", responding_to, status);
+        INFO("%d %d", responding_to, status);
         connection->internal_callback(connection, NULL, status);
     }
 }
@@ -111,7 +109,7 @@ cti_tunnel_response_parse(cti_connection_t connection)
     if (cti_connection_string_parse(connection, &tunnel_name) &&
         cti_connection_parse_done(connection))
     {
-        INFO("cti_tunnel_response_parse: %s", tunnel_name);
+        INFO("%s", tunnel_name);
         connection->internal_callback(connection, tunnel_name, kCTIStatus_NoError);
     }
     if (tunnel_name != NULL) {
@@ -133,7 +131,7 @@ cti_connection_release_(cti_connection_t connection, const char *file, int line)
     RELEASE(connection, cti_connection_finalize);
 }
 
-int
+static int
 cti_connection_create(void *context, cti_callback_t callback,
                       cti_internal_callback_t internal_callback, cti_connection_t *retcon)
 {
@@ -144,49 +142,20 @@ cti_connection_create(void *context, cti_callback_t callback,
     }
     RETAIN_HERE(connection);
 
-    struct sockaddr_un addr;
-
-    if (strlen(SERVER_SOCKET_NAME) + 1 >= sizeof(addr.sun_path)) {
-        ERROR("cti_connection_create: no space for " SERVER_SOCKET_NAME ".");
-        cti_connection_release(connection);
-        return kCTIStatus_NoMemory;
-    }
-
-    addr.sun_family = AF_LOCAL;
-    strncpy(addr.sun_path, SERVER_SOCKET_NAME, sizeof(addr.sun_path));
-#ifndef NOT_HAVE_SA_LEN
-    addr.sun_len = strlen(addr.sun_path) + 1 + sizeof(addr.sun_len) + sizeof(addr.sun_family);
-#endif
-
-    connection->fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+    connection->fd = cti_make_unix_socket(CTI_SERVER_SOCKET_NAME, sizeof(CTI_SERVER_SOCKET_NAME), false);
     if (connection->fd < 0) {
-        int ret = errno == EPERM ? kCTIStatus_NotPermitted : kCTIStatus_UnknownError;
+        int ret = errno == ECONNREFUSED ? kCTIStatus_DaemonNotRunning : EPERM ? kCTIStatus_NotPermitted : kCTIStatus_UnknownError;
         ERROR("cti_connection_create: socket: %s", strerror(errno));
         cti_connection_release(connection);
         return ret;
     }
 
-    if (connect(connection->fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        syslog(LOG_ERR, "cti_connection_create: %s", strerror(errno));
-    out:
-        close(connection->fd);
-        cti_connection_release(connection);
-        return kCTIStatus_DaemonNotRunning;
-    }
-
-#ifdef SO_NOSIGPIPE
-    if (setsockopt(connection->fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one) < 0) {
-        ERROR("cti_connection_create: SO_NOSIGPIPE failed: %s", strerror(errno));
-        goto out;
-    }
-#endif
-    if (fcntl(connection->fd, F_SETFL, O_NONBLOCK) < 0) {
-        ERROR("cti_connection_create: can't set O_NONBLOCK: %s", strerror(errno));
-        goto out;
-    }
     connection->io_context = ioloop_file_descriptor_create(connection->fd, connection, cti_fd_finalize);
     if (connection->io_context == NULL) {
-        goto out;
+        ERROR("cti_connection_create: can't create file descriptor object.");
+        close(connection->fd);
+        cti_connection_release(connection);
+        return kCTIStatus_NoMemory;
     }
     ioloop_add_reader(connection->io_context, cti_connection_read_callback);
     connection->context = context;
@@ -196,11 +165,10 @@ cti_connection_create(void *context, cti_callback_t callback,
     return kCTIStatus_NoError;
 }
 
-
 cti_status_t
-cti_add_service(void *context, cti_reply_t callback, run_context_t client_queue,
-                uint32_t enterprise_number, const uint8_t *NONNULL service_data, size_t service_data_length,
-                const uint8_t *NONNULL server_data, size_t server_data_length)
+cti_add_service_(void *context, cti_reply_t callback, run_context_t client_queue,
+                 uint32_t enterprise_number, const uint8_t *NONNULL service_data, size_t service_data_length,
+                 const uint8_t *NONNULL server_data, size_t server_data_length, const char *file, int line)
 {
     cti_callback_t app_callback;
     app_callback.reply = callback;
@@ -230,8 +198,9 @@ cti_add_service(void *context, cti_reply_t callback, run_context_t client_queue,
 }
 
 cti_status_t
-cti_remove_service(void *context, cti_reply_t callback, run_context_t client_queue,
-                   uint32_t enterprise_number, const uint8_t *NONNULL service_data, size_t service_data_length)
+cti_remove_service_(void *context, cti_reply_t callback, run_context_t client_queue,
+                    uint32_t enterprise_number, const uint8_t *NONNULL service_data, size_t service_data_length,
+                    const char *file, int line)
 {
     cti_callback_t app_callback;
     app_callback.reply = callback;
@@ -260,8 +229,9 @@ cti_remove_service(void *context, cti_reply_t callback, run_context_t client_que
 
 
 cti_status_t
-cti_add_prefix(void *context, cti_reply_t callback, run_context_t client_queue,
-               struct in6_addr *prefix, int prefix_length, bool on_mesh, bool preferred, bool slaac, bool stable)
+cti_add_prefix_(void *context, cti_reply_t callback, run_context_t client_queue,
+                struct in6_addr *prefix, int prefix_length, bool on_mesh, bool preferred, bool slaac, bool stable,
+                const char *file, int line)
 {
     cti_callback_t app_callback;
     int ret;
@@ -294,9 +264,8 @@ cti_add_prefix(void *context, cti_reply_t callback, run_context_t client_queue,
 }
 
 cti_status_t
-cti_remove_prefix(void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
-                  struct in6_addr *NONNULL prefix, int prefix_length)
-
+cti_remove_prefix_(void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                   struct in6_addr *NONNULL prefix, int prefix_length, const char *file, int line)
 {
     cti_callback_t app_callback;
     int ret;
@@ -328,7 +297,7 @@ static void
 cti_internal_tunnel_reply_callback(cti_connection_t conn_ref, void *tunnel_name, cti_status_t status)
 {
     cti_tunnel_reply_t callback;
-    INFO("cti_tunnel_internal_reply_callback: conn_ref = %p name = %s", conn_ref,
+    INFO("conn_ref = %p name = %s", conn_ref,
          tunnel_name == NULL ? "<NULL>" : (char *)tunnel_name);
     callback = conn_ref->callback.tunnel_reply;
     if (callback != NULL) {
@@ -339,7 +308,8 @@ cti_internal_tunnel_reply_callback(cti_connection_t conn_ref, void *tunnel_name,
 }
 
 cti_status_t
-cti_get_tunnel_name(void *NULLABLE context, cti_tunnel_reply_t NONNULL callback, run_context_t NULLABLE client_queue)
+cti_get_tunnel_name_(void *NULLABLE context, cti_tunnel_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                     const char *file, int line)
 {
     cti_callback_t app_callback;
     app_callback.tunnel_reply = callback;
@@ -367,7 +337,7 @@ static void
 cti_internal_state_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
     cti_state_reply_t callback;
-    INFO("cti_internal_state_event_callback: conn_ref = %p", conn_ref);
+    INFO("conn_ref = %p", conn_ref);
     if (status != kCTIStatus_NoError) {
         callback = conn_ref->callback.state_reply;
         if (callback != NULL) {
@@ -380,8 +350,8 @@ cti_internal_state_event_callback(cti_connection_t conn_ref, void *UNUSED object
 }
 
 cti_status_t
-cti_get_state(cti_connection_t *ref, void *NULLABLE context, cti_state_reply_t NONNULL callback,
-              run_context_t NULLABLE client_queue)
+cti_get_state_(cti_connection_t *ref, void *NULLABLE context, cti_state_reply_t NONNULL callback,
+               run_context_t NULLABLE client_queue, const char *file, int line)
 {
     cti_callback_t app_callback;
     app_callback.state_reply = callback;
@@ -408,7 +378,7 @@ static void
 cti_internal_partition_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
     cti_partition_id_reply_t callback;
-    INFO("cti_internal_partition_event_callback: conn_ref = %p", conn_ref);
+    INFO("conn_ref = %p", conn_ref);
     if (status != kCTIStatus_NoError) {
         callback = conn_ref->callback.partition_id_reply;
         if (callback != NULL) {
@@ -421,8 +391,8 @@ cti_internal_partition_event_callback(cti_connection_t conn_ref, void *UNUSED ob
 }
 
 cti_status_t
-cti_get_partition_id(cti_connection_t *ref, void *NULLABLE context, cti_partition_id_reply_t NONNULL callback,
-                     run_context_t NULLABLE client_queue)
+cti_get_partition_id_(cti_connection_t *ref, void *NULLABLE context, cti_partition_id_reply_t NONNULL callback,
+                      run_context_t NULLABLE client_queue, const char *file, int line)
 {
     cti_callback_t app_callback;
     app_callback.partition_id_reply = callback;
@@ -449,7 +419,7 @@ static void
 cti_internal_node_type_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
     cti_network_node_type_reply_t callback;
-    INFO("cti_internal_node_type_event_callback: conn_ref = %p", conn_ref);
+    INFO("conn_ref = %p", conn_ref);
     if (status != kCTIStatus_NoError) {
         callback = conn_ref->callback.network_node_type_reply;
         if (callback != NULL) {
@@ -462,8 +432,8 @@ cti_internal_node_type_event_callback(cti_connection_t conn_ref, void *UNUSED ob
 }
 
 cti_status_t
-cti_get_network_node_type(cti_connection_t *ref, void *NULLABLE context, cti_network_node_type_reply_t NONNULL callback,
-                     run_context_t NULLABLE client_queue)
+cti_get_network_node_type_(cti_connection_t *ref, void *NULLABLE context, cti_network_node_type_reply_t NONNULL callback,
+                           run_context_t NULLABLE client_queue, const char *file, int line)
 {
     cti_callback_t app_callback;
     app_callback.network_node_type_reply = callback;
@@ -562,7 +532,7 @@ static void
 cti_internal_service_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
     cti_service_reply_t callback;
-    INFO("cti_internal_service_event_callback: conn_ref = %p", conn_ref);
+    INFO("conn_ref = %p", conn_ref);
     if (status != kCTIStatus_NoError) {
         callback = conn_ref->callback.service_reply;
         if (callback != NULL) {
@@ -575,8 +545,8 @@ cti_internal_service_event_callback(cti_connection_t conn_ref, void *UNUSED obje
 }
 
 cti_status_t
-cti_get_service_list(cti_connection_t *ref, void *NULLABLE context, cti_service_reply_t NONNULL callback,
-                     run_context_t NULLABLE client_queue)
+cti_get_service_list_(cti_connection_t *ref, void *NULLABLE context, cti_service_reply_t NONNULL callback,
+                      run_context_t NULLABLE client_queue, const char *file, int line)
 {
     cti_callback_t app_callback;
     app_callback.service_reply = callback;
@@ -669,10 +639,10 @@ static void
 cti_internal_prefix_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
     cti_prefix_reply_t callback;
-    INFO("cti_internal_prefix_event_callback: conn_ref = %p", conn_ref);
+    INFO("conn_ref = %p", conn_ref);
     if (status != kCTIStatus_NoError) {
         callback = conn_ref->callback.prefix_reply;
-        if (callback != NULL) {
+        if (callback != NULL && conn_ref->context != NULL) {
             callback(conn_ref->context, 0, status);
             // Only one error callback ever.
             conn_ref->callback.reply = NULL;
@@ -682,8 +652,8 @@ cti_internal_prefix_event_callback(cti_connection_t conn_ref, void *UNUSED objec
 }
 
 cti_status_t
-cti_get_prefix_list(cti_connection_t *ref, void *NULLABLE context, cti_prefix_reply_t NONNULL callback,
-                     run_context_t NULLABLE client_queue)
+cti_get_prefix_list_(cti_connection_t *ref, void *NULLABLE context, cti_prefix_reply_t NONNULL callback,
+                     run_context_t NULLABLE client_queue, const char *file, int line)
 {
     cti_callback_t app_callback;
     app_callback.prefix_reply = callback;
@@ -705,6 +675,15 @@ cti_get_prefix_list(cti_connection_t *ref, void *NULLABLE context, cti_prefix_re
     return ret;
 }
 
+cti_status_t
+cti_events_discontinue(cti_connection_t connection)
+{
+    if (connection->io_context != NULL) {
+        cti_connection_close(connection);
+    }
+    cti_connection_release(connection);
+    return kCTIStatus_NoError;
+}
 static void
 cti_role_event_parse(cti_connection_t connection)
 {
@@ -714,7 +693,7 @@ cti_role_event_parse(cti_connection_t connection)
     if (cti_connection_u8_parse(connection, &role) &&
         cti_connection_parse_done(connection))
     {
-        INFO("cti_role_event_parse: %d", role);
+        INFO("%d", role);
         connection->callback.network_node_type_reply(connection, role, kCTIStatus_NoError);
     }
 }
@@ -728,7 +707,7 @@ cti_state_event_parse(cti_connection_t connection)
     if (cti_connection_u8_parse(connection, &state) &&
         cti_connection_parse_done(connection))
     {
-        INFO("cti_state_event_parse: %d", state);
+        INFO("%d", state);
         connection->callback.state_reply(connection, state, kCTIStatus_NoError);
     }
 }
@@ -742,7 +721,7 @@ cti_partition_event_parse(cti_connection_t connection)
     if (cti_connection_u32_parse(connection, &partition_id) &&
         cti_connection_parse_done(connection))
     {
-        INFO("cti_partition_event_parse: %d", partition_id);
+        INFO("%d", partition_id);
         connection->callback.partition_id_reply(connection, partition_id, kCTIStatus_NoError);
     }
 }
@@ -780,7 +759,7 @@ cti_service_event_parse(cti_connection_t connection)
             cti_service_t *service = NULL;
             dump_to_hex(service_data, service_data_length, service_data_buf, sizeof(service_data_buf));
             dump_to_hex(server_data, server_data_length, server_data_buf, sizeof(server_data_buf));
-            INFO("cti_service_event_parse: %" PRIu32 " %zd[ %s ] %zd[ %s ]",
+            INFO("%" PRIu32 " %" PRIu16 "[ %s ] %" PRIu16 "[ %s ]",
                  enterprise_number, service_data_length, service_data_buf, server_data_length, server_data_buf);
             if (enterprise_number == THREAD_ENTERPRISE_NUMBER) {
                 if (service_data_length == 1) {
@@ -801,7 +780,7 @@ cti_service_event_parse(cti_connection_t connection)
             return;
         }
 
-        INFO("cti_service_event_parse: %d", vec->num);
+        INFO("%zd", vec->num);
         connection->callback.service_reply(connection, vec, kCTIStatus_NoError);
     }
 }
@@ -864,7 +843,7 @@ cti_prefix_event_parse(cti_connection_t connection)
             return;
         }
 
-        INFO("cti_prefix_event_parse: %d", vec->num);
+        INFO("%zd", vec->num);
         connection->callback.prefix_reply(connection, vec, kCTIStatus_NoError);
     }
 }
@@ -899,13 +878,6 @@ cti_message_parse(cti_connection_t connection)
         cti_prefix_event_parse(connection);
         break;
     }
-}
-
-cti_status_t
-cti_events_discontinue(cti_connection_t ref)
-{
-    cti_connection_release(ref);
-    return kCTIStatus_NoError;
 }
 
 // Local Variables:

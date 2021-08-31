@@ -50,6 +50,9 @@ extern "C" {
 #include <Security/Security.h>
 #endif /* NO_SECURITYFRAMEWORK */
 
+#define kMDNSResponderIDStr "com.apple.mDNSResponder"
+#define kMDNSResponderID    CFSTR(kMDNSResponderIDStr)
+
 enum mDNSDynamicStoreSetConfigKey
 {
     kmDNSMulticastConfig = 1,

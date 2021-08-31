@@ -25,8 +25,6 @@
 #   include "CommonServices.h"
 #   include <winsock2.h>
 #   include <ws2tcpip.h>
-#   define strcasecmp   _stricmp
-#   define strncasecmp  _strnicmp
 
 static int
 inet_pton( int family, const char * addr, void * dst )
@@ -477,14 +475,18 @@ mDNSlocal void tcpConnectionCallback(TCPSocket *sock, void *context, mDNSBool Co
         case LNTExternalAddrOp:  handleLNTGetExternalAddressResponse(tcpInfo); break;
         case LNTPortMapOp:       handleLNTPortMappingResponse       (tcpInfo); break;
         case LNTPortMapDeleteOp: status = mStatus_ConfigChanged;               break;
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcovered-switch-default"
+#endif
         default:
             LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "tcpConnectionCallback: bad tcp operation! %d",
                 tcpInfo->op);
             status = mStatus_Invalid;
             break;
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
         }
     }
 exit:

@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2017-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -490,7 +490,7 @@ mDNSlocal mStatus _DNS64GetPrefixes(mDNS *m, mDNSu32 inResGroupID, nw_nat64_pref
     require_action_quiet(prefixCount > 0, exit, err = mStatus_UnknownErr);
 
     *outPrefixes    = prefixes;
-    *outPrefixCount = prefixCount;
+    *outPrefixCount = (uint32_t)prefixCount;
 
 exit:
     return (err);
@@ -566,7 +566,7 @@ mDNSlocal void _DNS64RestartQuestion(mDNS *const m, DNSQuestion *inQ, DNS64State
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 mDNSlocal mDNSBool _DNS64InterfaceSupportsNAT64(mdns_dns_service_t inDNSService)
 {
-    if (!mdns_dns_service_interface_has_ipv4_connectivity(inDNSService) &&
+    if (mdns_dns_service_is_default(inDNSService) && !mdns_dns_service_interface_has_ipv4_connectivity(inDNSService) &&
         mdns_dns_service_interface_has_ipv6_connectivity(inDNSService))
     {
         return (mDNStrue);

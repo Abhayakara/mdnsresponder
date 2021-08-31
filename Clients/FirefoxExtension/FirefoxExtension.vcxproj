@@ -120,7 +120,7 @@
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/NXCOMPAT /DYNAMICBASE /SAFESEH %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(SRCROOT)\AppleInternal\XULRunner\lib\nspr4.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcom.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcomglue_s.lib;ws2_32.lib;../../mDNSWindows/DLLStub/$(Platform)/$(Configuration)/dnssdStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(SRCROOT)\AppleInternal\XULRunner\lib\nspr4.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcom.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcomglue_s.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)DNSSDService.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -132,14 +132,6 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <OutputFile>.\$(OutDir)DNSSDService.bsc</OutputFile>
     </Bscmake>
-    <PostBuildEvent>
-      <Command>xcopy /I/Y $(Platform)\$(Configuration)\DNSSDService.dll extension\platform\WINNT\components
-if not "%RC_XBS%" == "YES" goto END
-if not exist "$(DSTROOT)\Program Files\Bonjour SDK\bin\$(Platform)\FirefoxExtension"                      mkdir "$(DSTROOT)\Program Files\Bonjour SDK\bin\$(Platform)\FirefoxExtension"
-xcopy /E/I/Y "extension"                                 "$(DSTROOT)\Program Files\Bonjour SDK\bin\$(Platform)\FirefoxExtension"
-:END
-</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <Midl>
@@ -174,7 +166,7 @@ xcopy /E/I/Y "extension"                                 "$(DSTROOT)\Program Fil
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/NXCOMPAT /DYNAMICBASE /SAFESEH %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(SRCROOT)\AppleInternal\XULRunner\lib\nspr4.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcom.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcomglue_s.lib;ws2_32.lib;../../mDNSWindows/DLLStub/$(Platform)/$(Configuration)/dnssdStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(SRCROOT)\AppleInternal\XULRunner\lib\nspr4.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcom.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcomglue_s.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)DNSSDService.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -185,14 +177,6 @@ xcopy /E/I/Y "extension"                                 "$(DSTROOT)\Program Fil
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <OutputFile>.\$(OutDir)DNSSDService.bsc</OutputFile>
     </Bscmake>
-    <PostBuildEvent>
-      <Command>xcopy /I/Y $(Platform)\$(Configuration)\DNSSDService.dll extension\platform\WINNT\components
-if not "%RC_XBS%" == "YES" goto END
-if not exist "$(DSTROOT)\Program Files\Bonjour SDK\bin\$(Platform)\FirefoxExtension"                      mkdir "$(DSTROOT)\Program Files\Bonjour SDK\bin\$(Platform)\FirefoxExtension"
-xcopy /E/I/Y "extension"                                 "$(DSTROOT)\Program Files\Bonjour SDK\bin\$(Platform)\FirefoxExtension"
-:END
-</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Midl>
@@ -228,7 +212,7 @@ xcopy /E/I/Y "extension"                                 "$(DSTROOT)\Program Fil
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/NXCOMPAT /DYNAMICBASE /SAFESEH %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(SRCROOT)\AppleInternal\XULRunner\lib\nspr4.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcom.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcomglue_s.lib;ws2_32.lib;../../mDNSWindows/DLLStub/$(Platform)/$(Configuration)/dnssdStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(SRCROOT)\AppleInternal\XULRunner\lib\nspr4.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcom.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcomglue_s.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)DNSSDService.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -241,9 +225,6 @@ xcopy /E/I/Y "extension"                                 "$(DSTROOT)\Program Fil
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <OutputFile>.\$(OutDir)DNSSDService.bsc</OutputFile>
     </Bscmake>
-    <PostBuildEvent>
-      <Command>xcopy /I/Y $(Platform)\$(Configuration)\DNSSDService.dll extension\platform\WINNT\components</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <Midl>
@@ -278,7 +259,7 @@ xcopy /E/I/Y "extension"                                 "$(DSTROOT)\Program Fil
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/NXCOMPAT /DYNAMICBASE /SAFESEH %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(SRCROOT)\AppleInternal\XULRunner\lib\nspr4.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcom.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcomglue_s.lib;ws2_32.lib;../../mDNSWindows/DLLStub/$(Platform)/$(Configuration)/dnssdStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(SRCROOT)\AppleInternal\XULRunner\lib\nspr4.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcom.lib;$(SRCROOT)\AppleInternal\XULRunner\lib\xpcomglue_s.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)DNSSDService.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -290,9 +271,6 @@ xcopy /E/I/Y "extension"                                 "$(DSTROOT)\Program Fil
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <OutputFile>.\$(OutDir)DNSSDService.bsc</OutputFile>
     </Bscmake>
-    <PostBuildEvent>
-      <Command>xcopy /I/Y $(Platform)\$(Configuration)\DNSSDService.dll extension\platform\WINNT\components</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CDNSSDService.cpp" />

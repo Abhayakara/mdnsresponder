@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2004-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  * 
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  * 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,7 +32,7 @@ BOOL APIENTRY	DllMain( HANDLE inModule, DWORD inReason, LPVOID inReserved )
 		case DLL_PROCESS_DETACH:
 			break;
 	}
-    return( TRUE );
+	return( TRUE );
 }
 
 
@@ -40,17 +40,18 @@ BOOL
 IsSystemServiceDisabled()
 {
 	ENUM_SERVICE_STATUS	*	lpService = NULL;
-	SC_HANDLE					sc;
-	BOOL							ret = FALSE;
-	BOOL							ok;
-	DWORD							bytesNeeded = 0;
-	DWORD							srvCount;
-	DWORD							resumeHandle = 0;
-	DWORD							srvType;
-	DWORD							srvState;
-	DWORD							dwBytes = 0;
-	DWORD							i;
-	OSStatus						err;
+	SC_HANDLE				sc;
+	BOOL					installed = FALSE;
+	BOOL					ret = FALSE;
+	BOOL					ok;
+	DWORD					bytesNeeded = 0;
+	DWORD					srvCount;
+	DWORD					resumeHandle = 0;
+	DWORD					srvType;
+	DWORD					srvState;
+	DWORD					dwBytes = 0;
+	DWORD					i;
+	OSStatus				err;
 
 	sc = OpenSCManager( NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE );
 	err = translate_errno( sc, GetLastError(), kUnknownErr );
@@ -88,6 +89,8 @@ IsSystemServiceDisabled()
 	{
 		if ( strcmp( lpService[i].lpServiceName, "Bonjour Service" ) == 0 )
 		{
+			installed = TRUE;
+
 			if ( ( lpService[i].ServiceStatus.dwCurrentState == SERVICE_PAUSED ) || ( lpService[i].ServiceStatus.dwCurrentState == SERVICE_STOPPED ) )
 			{
 				ret = TRUE;
@@ -109,5 +112,5 @@ exit:
 		CloseServiceHandle ( sc );
 	}
 
-	return ret;
+	return (ret || installed == FALSE);
 }

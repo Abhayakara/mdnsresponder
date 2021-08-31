@@ -1,12 +1,12 @@
 /* ioloop.h
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,6 +26,22 @@
 #include <sys/un.h>
 
 #include <dns_sd.h>
+
+#ifndef NSEC_PER_SEC
+#define NSEC_PER_SEC  1000000000ull
+#endif
+#ifndef NSEC_PER_MSEC
+#define NSEC_PER_MSEC    1000000ull
+#endif
+
+#define MSEC_PER_SEC (NSEC_PER_SEC / NSEC_PER_MSEC)
+
+#ifndef IN_LINKLOCAL
+#define IN_LINKLOCAL(x) (((uint32_t)(x) & 0xffff0000) == 0xA9FE0000) // 169.254.*
+#endif
+#ifndef IN_LOOPBACK
+#define IN_LOOPBACK(x) (((uint32_t)(x) & 0xff000000) == 0x7f000000) // 127.*
+#endif
 
 #ifndef __DSO_H
 typedef struct dso_state dso_state_t;
@@ -60,6 +76,7 @@ struct message {
 #endif
     int ifindex;
     uint16_t length;
+    time_t received_time; // Only for SRP Replication, zero otherwise.
     dns_wire_t wire;
 };
 
@@ -69,6 +86,7 @@ typedef struct io io_t;
 typedef struct subproc subproc_t;
 typedef struct wakeup wakeup_t;
 typedef struct dnssd_txn dnssd_txn_t;
+typedef struct interface_address_state interface_address_state_t;
 
 typedef void (*dnssd_txn_finalize_callback_t)(void *NONNULL context);
 typedef void (*dnssd_txn_failure_callback_t)(void *NONNULL context, int status);
@@ -80,7 +98,7 @@ typedef void (*io_callback_t)(io_t *NONNULL io, void *NONNULL context);
 typedef void (*comm_callback_t)(comm_t *NONNULL comm);
 typedef void (*datagram_callback_t)(comm_t *NONNULL comm, message_t *NONNULL message, void *NULLABLE context);
 typedef void (*connect_callback_t)(comm_t *NONNULL connection, void *NULLABLE context);
-typedef void (*disconnect_callback_t)(comm_t *NONNULL comm, int error);
+typedef void (*disconnect_callback_t)(comm_t *NONNULL comm, void *NULLABLE context, int error);
 enum interface_address_change { interface_address_added, interface_address_deleted, interface_address_unchanged };
 typedef void (*interface_callback_t)(void *NULLABLE context, const char *NONNULL name,
                                      const addr_t *NONNULL address, const addr_t *NONNULL netmask,
@@ -89,6 +107,8 @@ typedef void (*subproc_callback_t)(void *NULLABLE context, int status, const cha
 #ifdef IOLOOP_MACOS
 typedef bool (*ioloop_xpc_callback_t)(xpc_connection_t NULLABLE conn, xpc_object_t NULLABLE request);
 #endif
+typedef void (*tls_config_callback_t)(void *NONNULL context);
+typedef void (*async_callback_t)(void *NULLABLE context);
 
 typedef struct tls_context tls_context_t;
 
@@ -96,6 +116,14 @@ typedef struct tls_context tls_context_t;
 #define IOLOOP_MINUTE   60 * IOLOOP_SECOND
 #define IOLOOP_HOUR     60 * IOLOOP_MINUTE
 #define IOLOOP_DAY      24 * IOLOOP_HOUR
+
+struct interface_address_state {
+    interface_address_state_t *NULLABLE next;
+    char *NONNULL name;
+    addr_t addr;
+    addr_t mask;
+    uint32_t flags;
+};
 
 struct io {
     int ref_count;
@@ -127,14 +155,11 @@ struct wakeup {
 
 struct dso_transport {
 #ifdef IOLOOP_MACOS
-    int ref_count;
     nw_connection_t NULLABLE connection;
     nw_listener_t NULLABLE listener;
     nw_parameters_t NULLABLE parameters;
+    int ref_count;
     int writes_pending;
-    bool read_pending; // Only ever one.
-    bool server;       // Indicates that this connection was created by a listener
-    bool connection_ready;
     wakeup_t *NULLABLE idle_timer;
     // nw_connection objects aren't necessarily ready to write to immediately. But when we create an outgoing connection, we
     // typically want to write to it immediately. So we have a one-datum queue in case this happens; if the connection takes
@@ -167,9 +192,19 @@ struct dso_transport {
     size_t message_length_len;
     size_t message_length, message_cur;
     uint8_t message_length_bytes[2];
+#ifdef IOLOOP_MACOS
+    bool read_pending: 1; // Only ever one.
+    bool server: 1;       // Indicates that this connection was created by a listener
+    bool connection_ready: 1;
+    bool tls_rotation_ready: 1; // Indicates if the listener should rotate its TLS certificate.
+#else
+    bool tls_handshake_incomplete: 1;
+#endif // IOLOOP_MACOS
     bool tcp_stream: 1;
     bool is_multicast: 1;
     bool is_connected: 1;
+    bool is_listener: 1;
+    bool opportunistic: 1;
 };
 
 #define MAX_SUBPROC_ARGS 20
@@ -188,11 +223,12 @@ struct subproc {
     char *NULLABLE argv[MAX_SUBPROC_ARGS + 1];
     int argc;
     pid_t pid;
+    bool finished : 1;
 };
 
 struct dnssd_txn {
 #ifndef IOLOOP_MACOS
-    io_t *io;
+    io_t *NULLABLE io;
 #endif
     int ref_count;
     DNSServiceRef NULLABLE sdref;
@@ -209,14 +245,15 @@ message_t *NULLABLE message_allocate(size_t message_size);
 void message_free(message_t *NONNULL message);
 void ioloop_close(io_t *NONNULL io);
 void ioloop_add_reader(io_t *NONNULL io, io_callback_t NONNULL callback);
-wakeup_t *NULLABLE ioloop_wakeup_create(void);
+#define ioloop_wakeup_create() ioloop_wakeup_create_(__FILE__, __LINE__)
+wakeup_t *NULLABLE ioloop_wakeup_create_(const char *NONNULL file, int line);
 #define ioloop_wakeup_retain(wakeup) ioloop_wakeup_retain_(wakeup, __FILE__, __LINE__)
 void ioloop_wakeup_retain_(wakeup_t *NONNULL wakeup, const char *NONNULL file, int line);
 #define ioloop_wakeup_release(wakeup) ioloop_wakeup_release_(wakeup, __FILE__, __LINE__)
 void ioloop_wakeup_release_(wakeup_t *NONNULL wakeup, const char *NONNULL file, int line);
 bool ioloop_add_wake_event(wakeup_t *NONNULL wakeup, void *NULLABLE context,
                            wakeup_callback_t NONNULL callback, finalize_callback_t NULLABLE finalize,
-                           int milliseconds);
+                           int32_t milliseconds);
 void ioloop_cancel_wake_event(wakeup_t *NONNULL wakeup);
 
 bool ioloop_init(void);
@@ -226,6 +263,10 @@ int ioloop(void);
 void ioloop_comm_retain_(comm_t *NONNULL comm, const char *NONNULL file, int line);
 #define ioloop_comm_release(wakeup) ioloop_comm_release_(wakeup, __FILE__, __LINE__)
 void ioloop_comm_release_(comm_t *NONNULL comm, const char *NONNULL file, int line);
+void ioloop_comm_context_set(comm_t *NONNULL connection,
+                             void *NULLABLE context, finalize_callback_t NULLABLE callback);
+void ioloop_comm_connect_callback_set(comm_t *NONNULL comm, connect_callback_t NULLABLE callback);
+void ioloop_comm_disconnect_callback_set(comm_t *NONNULL comm, disconnect_callback_t NULLABLE callback);
 void ioloop_comm_cancel(comm_t *NONNULL comm);
 #define ioloop_listener_retain(comm) ioloop_listener_retain_(comm, __FILE__, __LINE__)
 void ioloop_listener_retain_(comm_t *NONNULL listener, const char *NONNULL file, int line);
@@ -237,13 +278,15 @@ comm_t *NULLABLE ioloop_listener_create(bool stream, bool tls, uint16_t *NULLABL
                                         const char *NONNULL name, datagram_callback_t NONNULL datagram_callback,
                                         connect_callback_t NULLABLE connected, cancel_callback_t NULLABLE cancel,
                                         ready_callback_t NULLABLE ready, finalize_callback_t NULLABLE finalize,
-                                        void *NULLABLE context);
-comm_t *NULLABLE ioloop_connection_create(addr_t *NONNULL remote_address, bool tls, bool stream,
-                                          datagram_callback_t NONNULL datagram_callback,
+                                        tls_config_callback_t NULLABLE tls_config, void *NULLABLE context);
+comm_t *NULLABLE ioloop_connection_create(addr_t *NONNULL remote_address, bool tls, bool stream, bool stable,
+                                          bool opportunistic, datagram_callback_t NONNULL datagram_callback,
                                           connect_callback_t NULLABLE connected,
                                           disconnect_callback_t NULLABLE disconnected,
                                           finalize_callback_t NULLABLE finalize,
                                           void *NONNULL context);
+#define ioloop_message_create(x) ioloop_message_create_(x, __FILE__, __LINE__)
+message_t *NULLABLE ioloop_message_create_(size_t message_size, const char *NONNULL file, int line);
 #define ioloop_message_retain(wakeup) ioloop_message_retain_(wakeup, __FILE__, __LINE__)
 void ioloop_message_retain_(message_t *NONNULL message, const char *NONNULL file, int line);
 #define ioloop_message_release(wakeup) ioloop_message_release_(wakeup, __FILE__, __LINE__)
@@ -251,7 +294,12 @@ void ioloop_message_release_(message_t *NONNULL message, const char *NONNULL fil
 bool ioloop_send_multicast(comm_t *NONNULL comm, int ifindex, struct iovec *NONNULL iov, int iov_len);
 bool ioloop_send_message(comm_t *NONNULL connection, message_t *NULLABLE responding_to,
                          struct iovec *NONNULL iov, int iov_len);
-bool ioloop_map_interface_addresses(void *NULLABLE context, interface_callback_t NONNULL callback);
+bool ioloop_map_interface_addresses(const char *NULLABLE ifname, void *NULLABLE context, interface_callback_t NULLABLE callback);
+#define ioloop_map_interface_addresses_here(here, ifname, context, callback) \
+    ioloop_map_interface_addresses_here_(here, ifname, context, callback, __FILE__, __LINE__)
+bool ioloop_map_interface_addresses_here_(interface_address_state_t *NONNULL *NULLABLE here,
+                                          const char *NULLABLE ifname, void *NULLABLE context, interface_callback_t NULLABLE callback,
+                                          const char *NONNULL file, int line);
 ssize_t ioloop_recvmsg(int sock, uint8_t *NONNULL buffer, size_t buffer_length, int *NONNULL ifindex,
                        int *NONNULL hoplimit, addr_t *NONNULL source, addr_t *NONNULL destination);
 #define ioloop_subproc_release(subproc) ioloop_subproc_release_(subproc, __FILE__, __LINE__)
@@ -261,6 +309,7 @@ void ioloop_subproc_retain_(subproc_t *NONNULL subproc, const char *NONNULL file
 subproc_t *NULLABLE ioloop_subproc(const char *NONNULL exepath, char *NULLABLE *NONNULL argv, int argc,
                                    subproc_callback_t NULLABLE callback, io_callback_t NULLABLE output_callback,
                                    void *NULLABLE context);
+void ioloop_subproc_run_sync(subproc_t *NONNULL subproc);
 #define ioloop_dnssd_txn_add(ref, context, finalize_callback, failure_callback) \
     ioloop_dnssd_txn_add_(ref, context, finalize_callback, failure_callback, __FILE__, __LINE__)
 dnssd_txn_t *NULLABLE
@@ -289,13 +338,13 @@ void ioloop_file_descriptor_retain_(io_t *NONNULL file_descriptor, const char *N
 void ioloop_file_descriptor_release_(io_t *NONNULL file_descriptor, const char *NONNULL file, int line);
 
 bool ioloop_interface_monitor_start(void);
+void ioloop_run_async(async_callback_t NULLABLE callback, void *NULLABLE context);
 
 
 bool srp_load_file_data(void *NULLABLE host_context, const char *NONNULL filename, uint8_t *NONNULL buffer,
                         uint16_t *NONNULL length, uint16_t buffer_size);
 bool srp_store_file_data(void *NULLABLE host_context, const char *NONNULL filename, uint8_t *NONNULL buffer,
                          uint16_t length);
-
 
 // Local Variables:
 // mode: C

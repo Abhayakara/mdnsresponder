@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -498,9 +498,14 @@ mDNSexport mDNSBool SameDomainLabel(const mDNSu8 *a, const mDNSu8 *b)
 
 mDNSexport mDNSBool SameDomainName(const domainname *const d1, const domainname *const d2)
 {
-    const mDNSu8 *      a   = d1->c;
-    const mDNSu8 *      b   = d2->c;
-    const mDNSu8 *const max = d1->c + MAX_DOMAIN_NAME;          // Maximum that's valid
+    return(SameDomainNameBytes(d1->c, d2->c));
+}
+
+mDNSexport mDNSBool SameDomainNameBytes(const mDNSu8 *const d1, const mDNSu8 *const d2)
+{
+    const mDNSu8 *      a   = d1;
+    const mDNSu8 *      b   = d2;
+    const mDNSu8 *const max = d1 + MAX_DOMAIN_NAME; // Maximum that's valid
 
     while (*a || *b)
     {
@@ -519,6 +524,21 @@ mDNSexport mDNSBool SameDomainNameCS(const domainname *const d1, const domainnam
     mDNSu16 l1 = DomainNameLength(d1);
     mDNSu16 l2 = DomainNameLength(d2);
     return(l1 <= MAX_DOMAIN_NAME && l1 == l2 && mDNSPlatformMemSame(d1, d2, l1));
+}
+
+mDNSexport mDNSBool IsSubdomain(const domainname *const subdomain, const domainname *const domain)
+{
+    mDNSBool isSubdomain = mDNSfalse;
+    const int subdomainLabelCount = CountLabels(subdomain);
+    const int domainLabelCount = CountLabels(domain);
+
+    if (subdomainLabelCount >= domainLabelCount)
+    {
+        const domainname *const parentDomain = SkipLeadingLabels(subdomain, subdomainLabelCount - domainLabelCount);
+        isSubdomain = SameDomainName(parentDomain, domain);
+    }
+
+    return isSubdomain;
 }
 
 mDNSexport mDNSBool IsLocalDomain(const domainname *d)
@@ -565,12 +585,17 @@ mDNSexport const mDNSu8 *LastLabel(const domainname *d)
 // For the FQDN "com." it returns 5 (length byte, three data bytes, final zero)
 // Legal results are 1 (just root label) to 256 (MAX_DOMAIN_NAME)
 // If the given domainname is invalid, result is 257 (MAX_DOMAIN_NAME+1)
-mDNSexport mDNSu16 DomainNameLengthLimit(const domainname *const name, const mDNSu8 *limit)
+mDNSexport mDNSu16 DomainNameLengthLimit(const domainname *const name, const mDNSu8 *const limit)
 {
-    const mDNSu8 *src = name->c;
-    while (src < limit && *src <= MAX_DOMAIN_LABEL)
+    return(DomainNameBytesLength(name->c, limit));
+}
+
+mDNSexport mDNSu16 DomainNameBytesLength(const mDNSu8 *const name, const mDNSu8 *const limit)
+{
+    const mDNSu8 *src = name;
+    while ((!limit || (src < limit)) && src && (*src <= MAX_DOMAIN_LABEL))
     {
-        if (*src == 0) return((mDNSu16)(src - name->c + 1));
+        if (*src == 0) return((mDNSu16)(src - name + 1));
         src += 1 + *src;
     }
     return(MAX_DOMAIN_NAME+1);
@@ -1313,8 +1338,8 @@ mDNSexport mDNSu32 RDataHashValue(const ResourceRecord *const rr)
 
     case kDNSType_NSEC: {
         int dlen;
-        dlen = DomainNameLength((const domainname *)rdb->data);
-        sum = DomainNameHashValue((const domainname *)rdb->data);
+        dlen = DomainNameLength(&rdb->name);
+        sum = DomainNameHashValue(&rdb->name);
         ptr += dlen;
         len -= dlen;
         fallthrough();
@@ -1394,10 +1419,10 @@ mDNSexport mDNSBool SameRDataBody(const ResourceRecord *const r1, const RDataBod
         // Note: rdlength of both the RData are same (ensured by the caller) and hence we can
         // use just r1->rdlength below
 
-        int dlen1 = DomainNameLength((const domainname *)b1->data);
-        int dlen2 = DomainNameLength((const domainname *)b2->data);
+        int dlen1 = DomainNameLength(&b1->name);
+        int dlen2 = DomainNameLength(&b2->name);
         return (mDNSBool)(dlen1 == dlen2 &&
-                          samename((const domainname *)b1->data, (const domainname *)b2->data) &&
+                          samename(&b1->name, &b2->name) &&
                           mDNSPlatformMemSame(b1->data + dlen1, b2->data + dlen2, r1->rdlength - dlen1));
     }
 
@@ -1468,7 +1493,7 @@ mDNSexport mDNSBool RRAssertsExistence(const ResourceRecord *const rr, mDNSu16 t
 
     if (rr->rrtype != kDNSType_NSEC) return mDNSfalse;
 
-    len = DomainNameLength((const domainname *)nsec);
+    len = DomainNameLength(&rdb->name);
 
     bitmaplen = rr->rdlength - len;
     bmap = nsec + len;
@@ -2443,7 +2468,9 @@ mDNSexport const mDNSu8 *skipDomainName(const DNSMessage *const msg, const mDNSu
 
         case 0x40:  debugf("skipDomainName: Extended EDNS0 label types 0x%X not supported", len); return(mDNSNULL);
         case 0x80:  debugf("skipDomainName: Illegal label length 0x%X", len); return(mDNSNULL);
-        case 0xC0:  return(ptr+1);
+        case 0xC0:  if (ptr + 1 > end)                          // Skip the two-byte name compression pointer.
+            { debugf("skipDomainName: Malformed compression pointer (overruns packet end)"); return(mDNSNULL); }
+            return(ptr + 1);
         }
     }
 }
@@ -2858,6 +2885,7 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
     {
         int savelen, len;
         domainname name;
+        mDNSu32 namelen;
         const mDNSu8 *orig = ptr;
 
         // Make sure the data is parseable and within the limits.
@@ -2905,6 +2933,7 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
         if (msg)
         {
             ptr = getDomainName(msg, ptr, end, &name);
+            namelen = DomainNameLength(&name);
         }
         else
         {
@@ -2912,7 +2941,8 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
             {
                 goto fail;
             }
-            ptr += DomainNameLength(&name);
+            namelen = DomainNameLength(&name);
+            ptr += namelen;
         }
         if (ptr != end)
         {
@@ -2920,7 +2950,7 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
             goto fail;
         }
 
-        rr->rdlength = savelen + DomainNameLength(&name);
+        rr->rdlength = savelen + namelen;
         // The uncompressed size should not exceed the limits
         if (rr->rdlength > MaximumRDSize)
         {
@@ -2929,7 +2959,7 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
             goto fail;
         }
         mDNSPlatformMemCopy(rdb->data, orig, savelen);
-        AssignDomainName((domainname *)(rdb->data + savelen), &name);
+        mDNSPlatformMemCopy(rdb->data + savelen, name.c, namelen);
         break;
     }
     case kDNSType_OPT:  {
@@ -3063,7 +3093,7 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
                     "bmaplen %d, name %##s", rdlength, rr->rdlength, name.c);
             goto fail;
         }
-        AssignDomainName((domainname *)rdb->data, &name);
+        AssignDomainName(&rdb->name, &name);
         mDNSPlatformMemCopy(rdb->data + dlen, bmap, bmaplen);
         break;
     }
@@ -3101,7 +3131,7 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
                     "bmaplen %d, name %##s", rdlength, rr->rdlength, name.c);
             goto fail;
         }
-        AssignDomainName((domainname *)rdb->data, &name);
+        AssignDomainName(&rdb->name, &name);
         mDNSPlatformMemCopy(rdb->data + dlen, ptr, rlen);
         break;
     }
@@ -3740,14 +3770,21 @@ mDNSlocal mDNSs32 GetNextScheduledEvent(const mDNS *const m)
     if (!m->DelaySleep && m->SleepLimit && e - m->NextScheduledSPRetry > 0) e = m->NextScheduledSPRetry;
     if (m->DelaySleep && e - m->DelaySleep > 0) e = m->DelaySleep;
 
-    if (m->SuppressSending)
+    if (m->SuppressQueries)
     {
-        if (e - m->SuppressSending       > 0) e = m->SuppressSending;
+        if (e - m->SuppressQueries       > 0) e = m->SuppressQueries;
     }
     else
     {
         if (e - m->NextScheduledQuery    > 0) e = m->NextScheduledQuery;
         if (e - m->NextScheduledProbe    > 0) e = m->NextScheduledProbe;
+    }
+    if (m->SuppressResponses)
+    {
+        if (e - m->SuppressResponses     > 0) e = m->SuppressResponses;
+    }
+    else
+    {
         if (e - m->NextScheduledResponse > 0) e = m->NextScheduledResponse;
     }
     if (e - m->NextScheduledStopTime > 0) e = m->NextScheduledStopTime;
@@ -3809,8 +3846,10 @@ mDNSexport void ShowTaskSchedulingError(mDNS *const m)
     if (m->DelaySleep && m->timenow - m->DelaySleep >= 0)
         LogTSE("Task Scheduling Error: m->DelaySleep %d",            m->timenow - m->DelaySleep);
 
-    if (m->SuppressSending && m->timenow - m->SuppressSending >= 0)
-        LogTSE("Task Scheduling Error: m->SuppressSending %d",       m->timenow - m->SuppressSending);
+    if (m->SuppressQueries && m->timenow - m->SuppressQueries >= 0)
+        LogTSE("Task Scheduling Error: m->SuppressQueries %d",       m->timenow - m->SuppressQueries);
+    if (m->SuppressResponses && m->timenow - m->SuppressResponses >= 0)
+        LogTSE("Task Scheduling Error: m->SuppressResponses %d",     m->timenow - m->SuppressResponses);
     if (m->timenow - m->NextScheduledQuery    >= 0)
         LogTSE("Task Scheduling Error: m->NextScheduledQuery %d",    m->timenow - m->NextScheduledQuery);
     if (m->timenow - m->NextScheduledProbe    >= 0)
@@ -4097,7 +4136,9 @@ hexadecimal: if (F.lSize) n = va_arg(arg, unsigned long);
                     F.precision = mDNS_VACB_Size - 1;
                 for (i = 0; n; n /= 16, i++) *--s = digits[n % 16];
                 for (; i < F.precision; i++) *--s = '0';
+#ifndef FUZZING // Pascal strings aren't supported for fuzzing
                 if (F.altForm) { *--s = (char)c; *--s = '0'; i += 2; }
+#endif
                 break;
 
             case 'c':  *--s = (char)va_arg(arg, int); i = 1; break;
@@ -4135,7 +4176,9 @@ hexadecimal: if (F.lSize) n = va_arg(arg, unsigned long);
                             }
                         }
                         break;
+#ifndef FUZZING // Pascal strings aren't supported for fuzzing
                     case 1: i = (unsigned char) *s++; break;                // Pascal string
+#endif
                     case 2: {                                               // DNS label-sequence name
                         unsigned char *a = (unsigned char *)s;
                         s = mDNS_VACB;                  // Adjust s to point to the start of the buffer, not the end
@@ -4169,11 +4212,14 @@ hexadecimal: if (F.lSize) n = va_arg(arg, unsigned long);
                 }
                 break;
 
-            case 'n':  s = va_arg(arg, char *);
+#ifndef FUZZING
+            case 'n':
+                s = va_arg(arg, char *);
                 if      (F.hSize) *(short *) s = (short)nwritten;
                 else if (F.lSize) *(long  *) s = (long)nwritten;
                 else *(int   *) s = (int)nwritten;
                 continue;
+#endif
 
             default:    s = mDNS_VACB;
                 i = mDNS_snprintf(mDNS_VACB, sizeof(mDNS_VACB), "<<UNKNOWN FORMAT CONVERSION CODE %%%c>>", mDNSIsPrintASCII(c) ? c : ' ');
@@ -4192,6 +4238,7 @@ hexadecimal: if (F.lSize) n = va_arg(arg, unsigned long);
 
             if (hexdump)
             {
+#ifndef FUZZING
                 char *dst = sbuffer;
                 const char *const lim = &sbuffer[buflen - nwritten];
                 if (F.havePrecision)
@@ -4206,6 +4253,7 @@ hexadecimal: if (F.lSize) n = va_arg(arg, unsigned long);
                 }
                 i = (unsigned int)(dst - sbuffer);
                 sbuffer = dst;
+#endif
             }
             else
             {

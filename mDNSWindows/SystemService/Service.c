@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2003-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  * 
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  * 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -36,6 +36,7 @@
 #include	"mDNSEmbeddedAPI.h"
 #include	"uDNS.h"
 #include	"mDNSWin32.h"
+#include	"mDNSDebug.h"
 
 #include	"Firewall.h"
 
@@ -201,6 +202,14 @@ typedef DWORD ( WINAPI * GetIpInterfaceEntryFunctionPtr )( PMIB_IPINTERFACE_ROW 
 mDNSlocal HMODULE								gIPHelperLibraryInstance		= NULL;
 mDNSlocal GetIpInterfaceEntryFunctionPtr		gGetIpInterfaceEntryFunctionPtr	= NULL;
 
+
+mDNSlocal HANDLE					gDNSThread = NULL;
+mDNSlocal HANDLE					gDNSThreadStopEvent = NULL;
+mDNSlocal HANDLE					gDNSThreadQuitEvent = NULL;
+
+#define	kDNSStopEvent				( WAIT_OBJECT_0 + 0 )
+
+bool gThreadStarted = false;
 
 #if 0
 #pragma mark -
@@ -495,7 +504,7 @@ static OSStatus SetServiceParameters()
 	//
 	// Add/Open Parameters section under service entry in registry
 	//
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode, &key );
+	err = RegCreateKey( HKEY_CURRENT_USER, kServiceParametersNode, &key );
 	require_noerr( err, exit );
 	
 	//
@@ -540,7 +549,7 @@ static OSStatus GetServiceParameters()
 	//
 	// Add/Open Parameters section under service entry in registry
 	//
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode, &key );
+	err = RegCreateKey( HKEY_CURRENT_USER, kServiceParametersNode, &key );
 	require_noerr( err, exit );
 	
 	valueLen = sizeof(DWORD);
@@ -647,7 +656,7 @@ static OSStatus CheckFirewall()
 	// the case, then we need to manipulate the firewall
 	// so networking works correctly.
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode, &key );
+	err = RegCreateKey( HKEY_CURRENT_USER, kServiceParametersNode, &key );
 	require_noerr( err, exit );
 
 	valueLen = sizeof(DWORD);
@@ -805,11 +814,110 @@ static void	ReportStatus( int inType, const char *inFormat, ... )
 //	RunDirect
 //===========================================================================================================================
 
+mDNSlocal unsigned WINAPI
+RunDirectMain(LPVOID inParam)
+{
+	DEBUG_UNUSED(inParam);
+
+	RunDirect(0, NULL);
+	SetEvent(gDNSThreadQuitEvent);
+	_endthreadex(0);
+	return 0;
+}
+
+#if _DEBUG
+const DWORD MS_VC_EXCEPTION = 0x406D1388;
+
+#pragma pack(push,8)
+typedef struct tagTHREADNAME_INFO
+{
+	DWORD dwType;     // Must be 0x1000.
+	LPCSTR szName;    // Pointer to name (in user addr space).
+	DWORD dwThreadID; // Thread ID (-1=caller thread).
+	DWORD dwFlags;    // Reserved for future use, must be zero.
+} THREADNAME_INFO;
+#pragma pack(pop)
+
+static void SetThreadName(DWORD dwThreadID, const char* threadName)
+{
+	THREADNAME_INFO info;
+	info.dwType = 0x1000;
+	info.szName = threadName;
+	info.dwThreadID = dwThreadID;
+	info.dwFlags = 0;
+#pragma warning(push)
+#pragma warning(disable: 6320 6322)
+	__try {
+		RaiseException(MS_VC_EXCEPTION, 0, sizeof(info) / sizeof(ULONG_PTR), (ULONG_PTR*)&info);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+	}
+#pragma warning(pop)
+}
+#endif
+
+int DNSSD_API DNSServiceStart()
+{
+	OSStatus err = kNoErr;
+	unsigned int threadAddr;
+
+	if (!gDNSThreadStopEvent)
+	{
+		gDNSThreadStopEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+		require_action(gDNSThreadStopEvent != NULL, exit, err = GetLastError());
+	}
+
+	if (!gDNSThreadQuitEvent)
+	{
+		gDNSThreadQuitEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+		require_action(gDNSThreadQuitEvent != NULL, exit, err = GetLastError());
+	}
+
+	if (gDNSThread == NULL)
+	{
+		gDNSThread = (HANDLE)_beginthreadex(NULL, 0, RunDirectMain, NULL, 0, &threadAddr);
+		require_action(gDNSThread != NULL, exit, err = GetLastError());
+
+#if _DEBUG
+		SetThreadName(threadAddr, "mDNSResponder");
+#endif
+	}
+
+exit:
+	return err;
+}
+
+
+void DNSSD_API DNSServiceStop()
+{
+	dlog(kDebugLevelTrace, DEBUG_NAME "tearing down DNS Service thread\n");
+	SetEvent(gDNSThreadStopEvent);
+	if (WaitForSingleObject(gDNSThreadQuitEvent, 5 * 1000) == WAIT_OBJECT_0)
+	{
+		if (gDNSThreadQuitEvent)
+		{
+			CloseHandle(gDNSThreadQuitEvent);
+			gDNSThreadQuitEvent = NULL;
+		}
+
+		if (gDNSThreadStopEvent)
+		{
+			CloseHandle(gDNSThreadStopEvent);
+			gDNSThreadStopEvent = NULL;
+		}
+	}
+}
+
+
+//===========================================================================================================================
+//	RunDirect
+//===========================================================================================================================
+
 int	RunDirect( int argc, LPTSTR argv[] )
 {
-	OSStatus		err;
-	BOOL			initialized;
-   BOOL        ok;
+	OSStatus	err;
+	BOOL        initialized;
+	BOOL        ok;
 	
 	initialized = FALSE;
 
@@ -1243,9 +1351,18 @@ static OSStatus	ServiceSpecificRun( int argc, LPTSTR argv[] )
 
 	while( !done )
 	{
+#ifdef WIN32_CENTENNIAL
+		DWORD ret = WaitForSingleObjectEx(gDNSThreadStopEvent, FALSE, 0);
+		if (ret != WAIT_TIMEOUT)
+		{
+			if (ret == kDNSStopEvent)
+			{
+				break;
+			}
+		}
+#endif
 		static mDNSs32 RepeatedBusy = 0;	
 		mDNSs32 nextTimerEvent;
-		mStatus err;
 
 		// Give the mDNS core a chance to do its work and determine next event time.
 
@@ -1317,6 +1434,10 @@ static OSStatus	ServiceSpecificStop( void )
 {
 	OSStatus    err;
 	BOOL        ok;
+
+#ifdef WIN32_CENTENNIAL
+	DNSServiceStop();
+#endif
 
 	ok = SetEvent(gStopEvent);
 	err = translate_errno( ok, (OSStatus) GetLastError(), kUnknownErr );
@@ -1494,7 +1615,7 @@ mDNSlocal mStatus	SetupNotifications()
 	gDdnsChangedEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 	err = translate_errno( gDdnsChangedEvent, (mStatus) GetLastError(), kUnknownErr );
 	require_noerr( err, exit );
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode TEXT("\\DynDNS\\Setup"), &gDdnsKey );
+	err = RegCreateKey( HKEY_CURRENT_USER, kServiceParametersNode TEXT("\\DynDNS\\Setup"), &gDdnsKey );
 	require_noerr( err, exit );
 	err = RegNotifyChangeKeyValue( gDdnsKey, TRUE, REG_NOTIFY_CHANGE_NAME|REG_NOTIFY_CHANGE_LAST_SET, gDdnsChangedEvent, TRUE);
 	require_noerr( err, exit );
@@ -1507,7 +1628,7 @@ mDNSlocal mStatus	SetupNotifications()
 	err = translate_errno( gFileSharingChangedEvent, (mStatus) GetLastError(), kUnknownErr );
 	require_noerr( err, exit );
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, TEXT("SYSTEM\\CurrentControlSet\\Services\\lanmanserver\\Shares"), &gFileSharingKey );
+	err = RegCreateKey( HKEY_CURRENT_USER, TEXT("SYSTEM\\CurrentControlSet\\Services\\lanmanserver\\Shares"), &gFileSharingKey );
 	
 	// Just to make sure that initialization doesn't fail on some old OS
 	// that doesn't have this key, we'll only add the notification if
@@ -1535,7 +1656,7 @@ mDNSlocal mStatus	SetupNotifications()
 	// that doesn't have this key, we'll only add the notification if
 	// the key exists.
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, TEXT("SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\FirewallRules"), &gFirewallKey );
+	err = RegCreateKey( HKEY_CURRENT_USER, TEXT("SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\FirewallRules"), &gFirewallKey );
 	
 	if ( !err )
 	{
@@ -1554,7 +1675,7 @@ mDNSlocal mStatus	SetupNotifications()
 	gAdvertisedServicesChangedEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 	err = translate_errno( gAdvertisedServicesChangedEvent, (mStatus) GetLastError(), kUnknownErr );
 	require_noerr( err, exit );
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode TEXT("\\Services"), &gAdvertisedServicesKey );
+	err = RegCreateKey( HKEY_CURRENT_USER, kServiceParametersNode TEXT("\\Services"), &gAdvertisedServicesKey );
 	require_noerr( err, exit );
 	err = RegNotifyChangeKeyValue( gAdvertisedServicesKey, TRUE, REG_NOTIFY_CHANGE_NAME|REG_NOTIFY_CHANGE_LAST_SET, gAdvertisedServicesChangedEvent, TRUE);
 	require_noerr( err, exit );
@@ -1833,6 +1954,7 @@ ComputerDescriptionNotification( HANDLE event, void *context )
 	{
 		int err = RegNotifyChangeKeyValue( gDescKey, TRUE, REG_NOTIFY_CHANGE_LAST_SET, gDescChangedEvent, TRUE);
 		check_noerr( err );
+		DEBUG_UNUSED( err );
 	}
 }
 
@@ -1854,6 +1976,7 @@ TCPChangedNotification( HANDLE event, void *context )
 	{
 		int err = RegNotifyChangeKeyValue( gTcpipKey, TRUE, REG_NOTIFY_CHANGE_NAME|REG_NOTIFY_CHANGE_LAST_SET, gTcpipChangedEvent, TRUE );
 		check_noerr( err );
+		DEBUG_UNUSED( err );
 	}
 }
 
@@ -1875,6 +1998,7 @@ DDNSChangedNotification( HANDLE event, void *context )
 	{
 		int err = RegNotifyChangeKeyValue(gDdnsKey, TRUE, REG_NOTIFY_CHANGE_NAME|REG_NOTIFY_CHANGE_LAST_SET, gDdnsChangedEvent, TRUE);
 		check_noerr( err );
+		DEBUG_UNUSED( err );
 	}
 }
 
@@ -1895,6 +2019,7 @@ FileSharingChangedNotification( HANDLE event, void *context )
 	{
 		int err = RegNotifyChangeKeyValue(gFileSharingKey, TRUE, REG_NOTIFY_CHANGE_NAME|REG_NOTIFY_CHANGE_LAST_SET, gFileSharingChangedEvent, TRUE);
 		check_noerr( err );
+		DEBUG_UNUSED( err );
 	}
 }
 
@@ -1915,6 +2040,7 @@ FirewallChangedNotification( HANDLE event, void *context )
 	{
 		int err = RegNotifyChangeKeyValue(gFirewallKey, TRUE, REG_NOTIFY_CHANGE_NAME|REG_NOTIFY_CHANGE_LAST_SET, gFirewallChangedEvent, TRUE);
 		check_noerr( err );
+		DEBUG_UNUSED( err );
 	}
 }
 
@@ -1936,6 +2062,7 @@ AdvertisedServicesChangedNotification( HANDLE event, void *context )
 	{
 		int err = RegNotifyChangeKeyValue(gAdvertisedServicesKey, TRUE, REG_NOTIFY_CHANGE_NAME|REG_NOTIFY_CHANGE_LAST_SET, gAdvertisedServicesChangedEvent, TRUE);
 		check_noerr( err );
+		DEBUG_UNUSED( err );
 	}
 }
 
@@ -2020,7 +2147,7 @@ UDSReadNotification( SOCKET sock, LPWSANETWORKEVENTS event, void *context )
 
 	if ( tcpSock )
 	{
-		tcpSock->userCallback( ( int ) tcpSock->fd, tcpSock->userContext );
+		tcpSock->udsEventCallback( ( int ) tcpSock->fd, tcpSock->userContext );
 	}
 }
 
@@ -2047,7 +2174,7 @@ udsSupportAddFDToEventLoop( SocketRef fd, udsEventCallback callback, void *conte
 		mDNSPlatformMemZero( sock, sizeof( TCPSocket ) );
 
 		sock->fd				= (SOCKET) fd;
-		sock->userCallback		= callback;
+		sock->udsEventCallback	= callback;
 		sock->userContext		= context;
 		sock->m					= &gMDNSRecord;
 
@@ -2072,7 +2199,7 @@ exit:
 
 
 int
-udsSupportReadFD( SocketRef fd, char *buf, int len, int flags, void *platform_data )
+udsSupportReadFD( SocketRef fd, char *buf, mDNSu32 len, int flags, void *platform_data )
 {
 	TCPSocket	*	sock;
 	mDNSBool		closed;
@@ -2159,7 +2286,7 @@ SystemWakeForNetworkAccess( LARGE_INTEGER * timeout )
 
 	// Make sure the user enabled bonjour sleep proxy client 
 	
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\Power Management", &key );
+	err = RegCreateKey( HKEY_CURRENT_USER, kServiceParametersNode L"\\Power Management", &key );
 	require_action( !err, exit, ok = FALSE );
 	dwSize = sizeof( DWORD );
 	err = RegQueryValueEx( key, L"Enabled", NULL, NULL, (LPBYTE) &enabled, &dwSize );
@@ -2268,7 +2395,7 @@ exit:
 	{
 		free(pIpForwardTable);
 	}
-    
+	
 	return found;
 }
 
@@ -2339,7 +2466,7 @@ SetLLRoute( mDNS * const inMDNS )
 	OSStatus err = kNoErr;
 
 	DEBUG_UNUSED( inMDNS );
-
+#ifndef WIN32_CENTENNIAL
 	//
 	// <rdar://problem/4096464> Don't call SetLLRoute on loopback
 	// <rdar://problem/6885843> Default route on Windows 7 breaks network connectivity
@@ -2411,7 +2538,7 @@ SetLLRoute( mDNS * const inMDNS )
 	}
 
 exit:
-
+#endif
 	return ( err );
 }
 
@@ -2532,12 +2659,12 @@ static bool
 IsNortelVPN( IP_ADAPTER_INFO * pAdapter )
 {
 	return ((pAdapter->Type == MIB_IF_TYPE_ETHERNET) &&
-		    (pAdapter->AddressLength == 6) &&
-		    (pAdapter->Address[0] == 0x44) &&
-		    (pAdapter->Address[1] == 0x45) &&
-		    (pAdapter->Address[2] == 0x53) &&
-		    (pAdapter->Address[3] == 0x54) &&
-		    (pAdapter->Address[4] == 0x42) &&
+			(pAdapter->AddressLength == 6) &&
+			(pAdapter->Address[0] == 0x44) &&
+			(pAdapter->Address[1] == 0x45) &&
+			(pAdapter->Address[2] == 0x53) &&
+			(pAdapter->Address[3] == 0x54) &&
+			(pAdapter->Address[4] == 0x42) &&
 			(pAdapter->Address[5] == 0x00)) ? true : false;
 }
 
@@ -2553,12 +2680,12 @@ static bool
 IsCiscoVPN( IP_ADAPTER_INFO * pAdapter )
 {
 	return ((pAdapter->Type == MIB_IF_TYPE_ETHERNET) &&
-		    (pAdapter->AddressLength == 6) &&
-		    (pAdapter->Address[0] == 0x00) &&
-		    (pAdapter->Address[1] == 0x05) &&
-		    (pAdapter->Address[2] == 0x9a) &&
-		    (pAdapter->Address[3] == 0x3c) &&
-		    (pAdapter->Address[4] == 0x7a) &&
+			(pAdapter->AddressLength == 6) &&
+			(pAdapter->Address[0] == 0x00) &&
+			(pAdapter->Address[1] == 0x05) &&
+			(pAdapter->Address[2] == 0x9a) &&
+			(pAdapter->Address[3] == 0x3c) &&
+			(pAdapter->Address[4] == 0x7a) &&
 			(pAdapter->Address[5] == 0x00)) ? true : false;
 }
 

@@ -123,8 +123,11 @@ typedef void
  *
  */
 
+#define cti_get_tunnel_name(context, callback, client_queue) \
+    cti_get_tunnel_name_(context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_tunnel_name(void *NULLABLE context, cti_tunnel_reply_t NONNULL callback, run_context_t NULLABLE client_queue);
+cti_get_tunnel_name_(void *NULLABLE context, cti_tunnel_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                     const char *NONNULL file, int line);
 
 /*
  * cti_service_vec_create
@@ -262,9 +265,11 @@ typedef void
  *
  */
 
+#define cti_get_service_list(ref, context, callback, client_queue) \
+    cti_get_service_list_(ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_service_list(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context, cti_service_reply_t NONNULL callback,
-                     run_context_t NULLABLE client_queue);
+cti_get_service_list_(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context, cti_service_reply_t NONNULL callback,
+                      run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
 /*
  * cti_service_vec_create
@@ -364,7 +369,7 @@ cti_prefix_release_(cti_prefix_t *NONNULL prefix, const char *NONNULL file, int 
  */
 
 typedef void
-(*cti_prefix_reply_t)(void *NULLABLE context, cti_prefix_vec_t *NONNULL prefixes, cti_status_t status);
+(*cti_prefix_reply_t)(void *NULLABLE context, cti_prefix_vec_t *NULLABLE prefixes, cti_status_t status);
 
 /* cti_get_prefix_list
  *
@@ -393,9 +398,11 @@ typedef void
  *
  */
 
+#define cti_get_prefix_list(ref, context, callback, client_queue) \
+    cti_get_prefix_list_(ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_prefix_list(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context, cti_prefix_reply_t NONNULL callback,
-                    run_context_t NULLABLE client_queue);
+cti_get_prefix_list_(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context, cti_prefix_reply_t NONNULL callback,
+                     run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
 /* cti_state_reply: Callback from cti_get_state()
  *
@@ -447,9 +454,11 @@ typedef void
  *
  */
 
+#define cti_get_state(ref, context, callback, client_queue) \
+    cti_get_state_(ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_state(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context, cti_state_reply_t NONNULL callback,
-              run_context_t NULLABLE client_queue);
+cti_get_state_(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context, cti_state_reply_t NONNULL callback,
+               run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
 /* cti_partition_id_reply: Callback from cti_get_partition_id()
  *
@@ -501,9 +510,12 @@ typedef void
  *
  */
 
+#define cti_get_partition_id(ref, context, callback, client_queue) \
+    cti_get_partition_id_(ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_partition_id(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
-                     cti_partition_id_reply_t NONNULL callback, run_context_t NULLABLE client_queue);
+cti_get_partition_id_(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+                      cti_partition_id_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                      const char *NONNULL file, int line);
 
 /* cti_network_node_type_reply: Callback from cti_get_network_node_type()
  *
@@ -555,9 +567,12 @@ typedef void
  *
  */
 
+#define cti_get_network_node_type(ref, context, callback, client_queue) \
+    cti_get_network_node_type_(ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_network_node_type(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
-                          cti_network_node_type_reply_t NONNULL callback, run_context_t NULLABLE client_queue);
+cti_get_network_node_type_(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+                           cti_network_node_type_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                           const char *NONNULL file, int line);
 
 /* cti_add_service
  *
@@ -593,10 +608,15 @@ cti_get_network_node_type(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABL
  *
  */
 
+#define cti_add_service(context, callback, client_queue, \
+                        enterprise_number, service_data, service_data_length, server_data, server_data_length) \
+    cti_add_service_(context, callback, client_queue, enterprise_number, \
+                     service_data, service_data_length, server_data, server_data_length, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_add_service(void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
-                uint32_t enterprise_number, const uint8_t *NONNULL service_data, size_t service_data_length,
-                const uint8_t *NONNULL server_data, size_t server_data_length);
+cti_add_service_(void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                 uint32_t enterprise_number, const uint8_t *NONNULL service_data, size_t service_data_length,
+                 const uint8_t *NONNULL server_data, size_t server_data_length,
+                 const char *NONNULL file, int line);
 
 /* cti_remove_service
  *
@@ -625,10 +645,14 @@ cti_add_service(void *NULLABLE context, cti_reply_t NONNULL callback, run_contex
  *                    that the request succeeded, merely that it was successfully started.
  */
 
+#define cti_remove_service(context, callback, client_queue, \
+                           enterprise_number, service_data, service_data_length) \
+    cti_remove_service_(context, callback, client_queue,            \
+                        enterprise_number, service_data, service_data_length, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_remove_service(void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
-                   uint32_t enterprise_number, const uint8_t *NONNULL service_data,
-                   size_t service_data_length);
+cti_remove_service_(void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                    uint32_t enterprise_number, const uint8_t *NONNULL service_data,
+                    size_t service_data_length, const char *NONNULL file, int line);
 
 /* cti_add_prefix
  *
@@ -653,10 +677,14 @@ cti_remove_service(void *NULLABLE context, cti_reply_t NONNULL callback, run_con
  *
  */
 
+#define cti_add_prefix(context, callback, client_queue, \
+                       prefix, prefix_length, on_mesh, preferred, slaac, stable) \
+    cti_add_prefix_(context, callback, client_queue, prefix, prefix_length, \
+                    on_mesh, preferred, slaac, stable, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_add_prefix(void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
-               struct in6_addr *NONNULL prefix, int prefix_length, bool on_mesh, bool preferred, bool slaac,
-               bool stable);
+cti_add_prefix_(void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                struct in6_addr *NONNULL prefix, int prefix_length, bool on_mesh, bool preferred, bool slaac,
+                bool stable, const char *NONNULL file, int line);
 
 /* cti_remove_prefix
  *
@@ -682,9 +710,11 @@ cti_add_prefix(void *NULLABLE context, cti_reply_t NONNULL callback, run_context
  *
  */
 
+#define cti_remove_prefix(context, callback, client_queue, prefix, prefix_length) \
+    cti_remove_prefix_(context, callback, client_queue, prefix, prefix_length, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_remove_prefix(void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
-                  struct in6_addr *NONNULL prefix, int prefix_length);
+cti_remove_prefix_(void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                   struct in6_addr *NONNULL prefix, int prefix_length, const char *NONNULL file, int line);
 
 /* cti_events_discontinue
  *
@@ -695,7 +725,7 @@ DNS_SERVICES_EXPORT cti_status_t
 cti_events_discontinue(cti_connection_t NONNULL ref);
 
 typedef union cti_callback {
-    cti_reply_t NONNULL reply;
+    cti_reply_t NULLABLE reply;
     cti_tunnel_reply_t NONNULL tunnel_reply;
     cti_service_reply_t NONNULL service_reply;
     cti_prefix_reply_t NONNULL prefix_reply;

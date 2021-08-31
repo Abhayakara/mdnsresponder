@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2002-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -204,6 +204,13 @@ extern int mDNS_PacketLoggingEnabled;
 extern int mDNS_McastLoggingEnabled;
 extern int mDNS_McastTracingEnabled;
 extern int mDNS_DebugMode;          // If non-zero, LogMsg() writes to stderr instead of syslog
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+extern int gNumOfPrivateLogRedactionEnabledQueries;
+extern int gPrivateLogRedactionEnabled; // If true, LogRedact() will redact all private level logs. The content of state
+                                        // dump that is related to user's privacy will also be redacted.
+#endif
+
 extern const char ProgramName[];
 
 extern void LogMsgWithLevel(mDNSLogCategory_t category, mDNSLogLevel_t level, const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(3,4);

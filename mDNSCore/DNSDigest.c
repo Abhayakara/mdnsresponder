@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2002-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -392,8 +392,10 @@ void md5_block_data_order (MD5_CTX *c, const void *p,int num);
 /*
  * Engage compiler specific rotate intrinsic function if available.
  */
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-macros"
+#endif
 #undef ROTATE
 #ifndef PEDANTIC
 # if 0 /* defined(_MSC_VER) */
@@ -649,7 +651,9 @@ void md5_block_data_order (MD5_CTX *c, const void *p,int num);
 
 #endif
 
+#if defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
 
 /*
  * Time for some action:-)
@@ -658,7 +662,7 @@ void md5_block_data_order (MD5_CTX *c, const void *p,int num);
 int HASH_UPDATE (HASH_CTX *c, const void *data_, unsigned long len)
 {
     const unsigned char *data=(const unsigned char *)data_;
-    const unsigned char * const data_end=(const unsigned char *)data_;
+    const unsigned char * const data_end=(const unsigned char *)data_ + len;
     register HASH_LONG * p;
     register unsigned long l;
     int sw,sc,ew,ec;
@@ -956,7 +960,9 @@ void md5_block_host_order (MD5_CTX *c, const void *data, int num)
     for (; num--; X+=HASH_LBLOCK)
     {
         /* Round 0 */
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
+#endif
 #ifdef __clang__
 #pragma GCC diagnostic ignored "-Wlanguage-extension-token"
 #pragma GCC diagnostic ignored "-Wgnu-statement-expression"
@@ -1028,7 +1034,9 @@ void md5_block_host_order (MD5_CTX *c, const void *data, int num)
         R3(D,A,B,C,X[11],10,0xbd3af235L);
         R3(C,D,A,B,X[ 2],15,0x2ad7d2bbL);
         R3(B,C,D,A,X[ 9],21,0xeb86d391L);
+#if defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
 
         A = c->A += A;
         B = c->B += B;
@@ -1069,7 +1077,9 @@ void md5_block_data_order (MD5_CTX *c, const void *data_, int num)
     {
         HOST_c2l(data,l); X( 0)=l;      HOST_c2l(data,l); X( 1)=l;
         /* Round 0 */
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
+#endif
 #ifdef __clang__
 #pragma GCC diagnostic ignored "-Wlanguage-extension-token"
 #pragma GCC diagnostic ignored "-Wgnu-statement-expression"
@@ -1141,7 +1151,9 @@ void md5_block_data_order (MD5_CTX *c, const void *data_, int num)
         R3(D,A,B,C,X(11),10,0xbd3af235L);
         R3(C,D,A,B,X( 2),15,0x2ad7d2bbL);
         R3(B,C,D,A,X( 9),21,0xeb86d391L);
+#if defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
 
         A = c->A += A;
         B = c->B += B;

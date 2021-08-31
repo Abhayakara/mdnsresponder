@@ -98,7 +98,7 @@ extern "C" {
 
 #if ( !defined( TARGET_OS_WIN32 ) )
     #if ( macintosh || __MACH__ )
-// ConditionalMacros.h in CoreServices will define this TARGET_* flag.
+        #define TARGET_OS_WIN32         0
     #else
         #if ( defined( _WIN32 ) )
             #define TARGET_OS_WIN32     1
@@ -237,6 +237,8 @@ extern "C" {
         #include    <stdint.h>
 
     #elif ( defined( _MSC_VER ) )
+
+    #include    "VisualStudioSupport.h"
 
         #if ( _MSC_VER >= 1900 )
             #include    <stdint.h>

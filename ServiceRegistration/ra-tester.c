@@ -52,6 +52,10 @@ usage(void)
     exit(1);
 }
 
+#ifdef FUZZING
+#define main ra_tester_main
+#endif
+
 int
 main(int argc, char **argv)
 {
@@ -59,6 +63,7 @@ main(int argc, char **argv)
 	extern char *thread_interface_name;
     extern char *home_interface_name;
 	extern bool advertise_default_route_on_thread;
+    bool log_stderr = true;
 
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-t")) {
@@ -86,7 +91,7 @@ main(int argc, char **argv)
         INFO("home interface name required.");
         usage();
     }
-    OPENLOG(log_stderr);
+    OPENLOG("ra-tester", log_stderr);
 
     if (!ioloop_init()) {
         return 1;

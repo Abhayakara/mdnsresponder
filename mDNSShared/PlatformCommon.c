@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2004-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2004-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,6 +29,8 @@
 #include <sys/fcntl.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <time.h>
+#include <sys/time.h>           // Needed for #include <sys/time.h>().
 #include <assert.h>
 
 
@@ -174,7 +176,7 @@ mDNSexport void mDNSPlatformSourceAddrForDest(mDNSAddr *const src, const mDNSAdd
     {
         inner_len = sizeof(addr.a4);
         #ifndef NOT_HAVE_SA_LEN
-        addr.a4.sin_len         = inner_len;
+        addr.a4.sin_len         = (unsigned char)inner_len;
         #endif
         addr.a4.sin_family      = AF_INET;
         addr.a4.sin_port        = 1;    // Not important, any port will do
@@ -184,7 +186,7 @@ mDNSexport void mDNSPlatformSourceAddrForDest(mDNSAddr *const src, const mDNSAdd
     {
         inner_len = sizeof(addr.a6);
         #ifndef NOT_HAVE_SA_LEN
-        addr.a6.sin6_len      = inner_len;
+        addr.a6.sin6_len      = (unsigned char)inner_len;
         #endif
         addr.a6.sin6_family   = AF_INET6;
         addr.a6.sin6_flowinfo = 0;
@@ -314,7 +316,7 @@ mDNSexport void mDNSPlatformWriteLogMsg(const char *ident, const char *buffer, m
 
 mDNSexport mDNSBool mDNSPosixTCPSocketSetup(int *fd, mDNSAddr_Type addrType, mDNSIPPort *port, mDNSIPPort *outTcpPort)
 {
-    int sa_family = (addrType == mDNSAddrType_IPv4) ? AF_INET : AF_INET6;
+    const sa_family_t sa_family = (addrType == mDNSAddrType_IPv4) ? AF_INET : AF_INET6;
     int err;
     int sock;
     mDNSu32 lowWater = 15384;
@@ -344,7 +346,7 @@ mDNSexport mDNSBool mDNSPosixTCPSocketSetup(int *fd, mDNSAddr_Type addrType, mDN
 
         addr.sa.sa_family = sa_family;
 #ifndef NOT_HAVE_SA_LEN
-	addr.sa.sa_len = len;
+        addr.sa.sa_len = (unsigned char)len;
 #endif
         if (sa_family == AF_INET6)
         {
@@ -380,12 +382,14 @@ mDNSexport mDNSBool mDNSPosixTCPSocketSetup(int *fd, mDNSAddr_Type addrType, mDN
     if (port)
         port->NotAnInteger = outTcpPort->NotAnInteger;
 
+#ifdef TCP_NOTSENT_LOWAT
     err = setsockopt(sock, IPPROTO_TCP, TCP_NOTSENT_LOWAT, &lowWater, sizeof lowWater);
     if (err < 0)
     {
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "mDNSPosixTCPSocketSetup: TCP_NOTSENT_LOWAT failed: " PUB_S, strerror(errno));
         return mDNSfalse;
     }
+#endif // TCP_NOTSENT_LOWAT
 
     return mDNStrue;
 }
@@ -430,6 +434,7 @@ mDNSexport TCPSocket *mDNSPosixDoTCPListenCallback(int fd, mDNSAddr_Type address
         goto out;
     }
 
+#ifdef TCP_NOTSENT_LOWAT
     failed = setsockopt(remoteSock, IPPROTO_TCP, TCP_NOTSENT_LOWAT,
                         &lowWater, sizeof lowWater);
     if (failed < 0)
@@ -438,6 +443,7 @@ mDNSexport TCPSocket *mDNSPosixDoTCPListenCallback(int fd, mDNSAddr_Type address
         LogMsg("mDNSPosixDoTCPListenCallback: TCP_NOTSENT_LOWAT returned %d", errno);
         goto out;
     }
+#endif // TCP_NOTSENT_LOWAT
 
     if (address.sa.sa_family == AF_INET6)
     {
@@ -578,7 +584,7 @@ mDNSexport mDNSBool mDNSPosixTCPListen(int *fd, mDNSAddr_Type addrtype, mDNSIPPo
         return mDNSfalse;
     }
 #ifndef NOT_HAVE_SA_LEN
-    address.sa.sa_len = sock_len;
+    address.sa.sa_len = (unsigned char)sock_len;
 #endif
     sock = socket(address.sa.sa_family, SOCK_STREAM, IPPROTO_TCP);
 
@@ -644,7 +650,11 @@ mDNSexport long mDNSPosixReadTCP(int fd, void *buf, unsigned long buflen, mDNSBo
 {
     static int CLOSEDcount = 0;
     static int EAGAINcount = 0;
+#ifndef FUZZING
     ssize_t nread = recv(fd, buf, buflen, 0);
+#else
+    ssize_t nread = read(fd, buf, buflen);
+#endif
 
     if (nread > 0)
     {
@@ -710,4 +720,74 @@ mDNSexport long mDNSPosixWriteTCP(int fd, const char *msg, unsigned long len)
         nsent = (long)result;
     }
     return nsent;
+}
+
+mDNSlocal void timevalFromPlatformTime(const mDNSs32 platformTimeNow, const mDNSs32 platformTime,
+                                       struct timeval *const outTv)
+{
+    struct timeval now;
+    gettimeofday(&now, mDNSNULL);
+
+    // Ensure that mDNSPlatformOneSecond * USEC_PER_SEC does not overflow for mDNSs32.
+    if (INT32_MAX / (mDNSs32)USEC_PER_SEC < mDNSPlatformOneSecond)
+    {
+        outTv->tv_sec = now.tv_sec;
+        outTv->tv_usec = now.tv_usec;
+        return;
+    }
+
+    if (platformTime - platformTimeNow > 0)
+    {
+        // The time is in the future.
+        const mDNSs32 remainingTime = platformTime - platformTimeNow;
+        const mDNSs32 remainingSeconds = remainingTime / mDNSPlatformOneSecond;
+        const mDNSs32 remainingMicroSeconds = (remainingTime % mDNSPlatformOneSecond) * (mDNSs32)USEC_PER_SEC / mDNSPlatformOneSecond;
+
+        outTv->tv_sec = now.tv_sec + remainingSeconds + ((now.tv_usec + remainingMicroSeconds) / (mDNSs32)USEC_PER_SEC);
+        outTv->tv_usec = ((now.tv_usec + remainingMicroSeconds) % (mDNSs32)USEC_PER_SEC);
+    }
+    else
+    {
+        // The time is in the past.
+        const mDNSs32 passedTime = platformTimeNow - platformTime;
+        const mDNSs32 passedSeconds = passedTime / mDNSPlatformOneSecond;
+        const mDNSs32 passedMicroSeconds = (passedTime % mDNSPlatformOneSecond) * (mDNSs32)USEC_PER_SEC / mDNSPlatformOneSecond;
+
+        outTv->tv_sec = now.tv_sec - passedSeconds - (passedMicroSeconds > now.tv_usec ? 1 : 0);
+        outTv->tv_usec = (passedMicroSeconds > now.tv_usec ? (mDNSs32)USEC_PER_SEC : 0) + now.tv_usec - passedMicroSeconds;
+    }
+}
+
+mDNSlocal void getLocalTimestampFromTimeval(const struct timeval *const tv,
+                                            char *const outBuffer, const mDNSu32 bufferLen)
+{
+    struct tm localTime;
+    char dateTimeStr[20]; // 1900-01-01 00:00:00\0
+    char timeZoneStr[6]; // -0000\0
+
+    localtime_r(&tv->tv_sec, &localTime);
+
+    // Get formatted date and time.
+    strftime(dateTimeStr, sizeof(dateTimeStr), "%F %T", &localTime);
+    // Get formatted time zone offset.
+    strftime(timeZoneStr, sizeof(timeZoneStr), "%z", &localTime);
+
+    // Construct the final timestamp with the milliseconds.
+    snprintf(outBuffer, bufferLen, "%s.%03u%s", dateTimeStr, (mDNSs32)tv->tv_usec / (mDNSs32)USEC_PER_MSEC,
+             timeZoneStr);
+}
+
+mDNSexport void getLocalTimestampFromPlatformTime(const mDNSs32 platformTimeNow, const mDNSs32 platformTime,
+                                                  char *const outBuffer, const mDNSu32 bufferLen)
+{
+    struct timeval tv;
+    timevalFromPlatformTime(platformTimeNow, platformTime, &tv);
+    getLocalTimestampFromTimeval(&tv, outBuffer, bufferLen);
+}
+
+mDNSexport void getLocalTimestampNow(char *const outBuffer, const mDNSu32 bufferLen)
+{
+    struct timeval now;
+    gettimeofday(&now, mDNSNULL);
+    getLocalTimestampFromTimeval(&now, outBuffer, bufferLen);
 }

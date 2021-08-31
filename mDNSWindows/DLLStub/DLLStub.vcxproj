@@ -100,23 +100,23 @@
   <PropertyGroup>
     <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(Platform)\$(Configuration)\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\</OutDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(Platform)\$(Configuration)\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(Platform)\$(Configuration)\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\</OutDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">$(Platform)\$(Configuration)\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">dnssdStatic</TargetName>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">dnssdStatic</TargetName>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">dnssdStatic</TargetName>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">dnssdStatic</TargetName>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">dnssdStatic</TargetName>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">dnssdStatic</TargetName>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">dnssd_stub</TargetName>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">dnssd_stub</TargetName>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">dnssd_stub</TargetName>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">dnssd_stub</TargetName>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">dnssd_stub</TargetName>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">dnssd_stub</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -128,13 +128,10 @@
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <ProgramDataBaseFileName>$(IntDir)dnssd.pdb</ProgramDataBaseFileName>
       <WarningLevel>Level3</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ProgramDataBaseFileName>$(IntDir)$(TargetName).pdb</ProgramDataBaseFileName>
     </ClCompile>
-    <Lib>
-      <OutputFile>$(OutDir)dnssdStatic.lib</OutputFile>
-    </Lib>
+    <Lib />
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Midl>
@@ -149,13 +146,10 @@
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <ProgramDataBaseFileName>$(IntDir)dnssd.pdb</ProgramDataBaseFileName>
       <WarningLevel>Level3</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ProgramDataBaseFileName>$(IntDir)$(TargetName).pdb</ProgramDataBaseFileName>
     </ClCompile>
-    <Lib>
-      <OutputFile>$(OutDir)dnssdStatic.lib</OutputFile>
-    </Lib>
+    <Lib />
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <Midl />
@@ -168,13 +162,10 @@
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <ProgramDataBaseFileName>$(IntDir)dnssd.pdb</ProgramDataBaseFileName>
       <WarningLevel>Level3</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ProgramDataBaseFileName>$(IntDir)$(TargetName).pdb</ProgramDataBaseFileName>
     </ClCompile>
-    <Lib>
-      <OutputFile>$(OutDir)dnssdStatic.lib</OutputFile>
-    </Lib>
+    <Lib />
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -183,21 +174,10 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <ProgramDataBaseFileName>$(IntDir)dnssd.lib.pdb</ProgramDataBaseFileName>
       <WarningLevel>Level3</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ProgramDataBaseFileName>$(IntDir)$(TargetName).pdb</ProgramDataBaseFileName>
     </ClCompile>
-    <Lib>
-      <OutputFile>$(OutDir)dnssdStatic.lib</OutputFile>
-    </Lib>
-    <PostBuildEvent>
-      <Command>if not "%RC_XBS%" == "YES" goto END
-if not exist "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)" mkdir "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)"
-echo F | xcopy /Y "$(OutDir)dnssdStatic.lib"                                                        "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)\dnssd.lib"
-xcopy /Y "$(OutDir)dnssd.lib.pdb"                                                                         "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)"
-:END
-</Command>
-    </PostBuildEvent>
+    <Lib />
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Midl>
@@ -209,21 +189,10 @@ xcopy /Y "$(OutDir)dnssd.lib.pdb"                                               
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <ProgramDataBaseFileName>$(IntDir)dnssd.lib.pdb</ProgramDataBaseFileName>
       <WarningLevel>Level3</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ProgramDataBaseFileName>$(IntDir)$(TargetName).pdb</ProgramDataBaseFileName>
     </ClCompile>
-    <Lib>
-      <OutputFile>$(OutDir)dnssdStatic.lib</OutputFile>
-    </Lib>
-    <PostBuildEvent>
-      <Command>if not "%RC_XBS%" == "YES" goto END
-if not exist "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)" mkdir "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)"
-echo F | xcopy /I/Y "$(OutDir)dnssdStatic.lib"                                                     "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)\dnssd.lib"
-xcopy /Y "$(OutDir)dnssd.lib.pdb"                                                                         "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)"
-:END
-</Command>
-    </PostBuildEvent>
+    <Lib />
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <Midl />
@@ -233,21 +202,10 @@ xcopy /Y "$(OutDir)dnssd.lib.pdb"                                               
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <ProgramDataBaseFileName>$(IntDir)dnssd.lib.pdb</ProgramDataBaseFileName>
       <WarningLevel>Level3</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ProgramDataBaseFileName>$(IntDir)$(TargetName).pdb</ProgramDataBaseFileName>
     </ClCompile>
-    <Lib>
-      <OutputFile>$(OutDir)dnssdStatic.lib</OutputFile>
-    </Lib>
-    <PostBuildEvent>
-      <Command>if not "%RC_XBS%" == "YES" goto END
-if not exist "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)" mkdir "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)"
-echo F | xcopy /I/Y "$(OutDir)dnssdStatic.lib"                                                     "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)\dnssd.lib"
-xcopy /Y "$(OutDir)dnssd.lib.pdb"                                                                         "$(DSTROOT)\Program Files\Bonjour SDK\lib\$(Platform)"
-:END
-</Command>
-    </PostBuildEvent>
+    <Lib />
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="DLLStub.cpp" />
@@ -265,6 +223,7 @@ xcopy /Y "$(OutDir)dnssd.lib.pdb"                                               
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Import Project="..\XBS.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>

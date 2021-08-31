@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2003-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -37,6 +37,11 @@ mDNSexport int mDNS_McastTracingEnabled  = 0;
 mDNSexport int mDNS_DebugMode = mDNStrue;
 #else
 mDNSexport int mDNS_DebugMode = mDNSfalse;
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+mDNSexport int gNumOfPrivateLogRedactionEnabledQueries = 0;
+mDNSexport int gPrivateLogRedactionEnabled = 0;
 #endif
 
 // Note, this uses mDNS_vsnprintf instead of standard "vsnprintf", because mDNS_vsnprintf knows

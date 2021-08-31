@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,35 +19,38 @@
 #define __MDNS_STRICT_H__
 
 #ifndef MDNS_NO_STRICT
-#define MDNS_NO_STRICT				0
-#endif
+	#if !defined(__APPLE__)
+		#define MDNS_NO_STRICT				1
+	#else // !defined(__APPLE__)
+		#define MDNS_NO_STRICT				0
+	#endif // !defined(__APPLE__)
+#endif // MDNS_NO_STRICT
 
-#define APPLE_OSX_mDNSResponder		0
+	#define APPLE_OSX_mDNSResponder			0
 
 #ifndef DEBUG
-#define DEBUG 0
+	#define DEBUG 							0
 #endif
 
+#ifndef _MDNS_STRICT_DISPOSE_TEMPLATE
+	#if MDNS_NO_STRICT
+		#define _MDNS_STRICT_DISPOSE_TEMPLATE(ptr, function) \
+			do {                                        \
+				if ((ptr) != NULL) {                    \
+					function(ptr);                      \
+					(ptr) = NULL;                       \
+				}                                       \
+			} while(0)
+	#else // MDNS_NO_STRICT
+		#define _MDNS_STRICT_DISPOSE_TEMPLATE _STRICT_DISPOSE_TEMPLATE
+	#endif // MDNS_NO_STRICT
+#endif // _MDNS_STRICT_DISPOSE_TEMPLATE
 
-#if !MDNS_NO_STRICT && (TARGET_OS_OSX || TARGET_OS_IPHONE || TARGET_OS_SIMULATOR)
-
+#if !MDNS_NO_STRICT
 #include <CoreFoundation/CoreFoundation.h>
 #include <os/log.h>
 
-#ifndef MDNS_ALLOW_GOTO
-#define MDNS_ALLOW_GOTO 1
-#endif
-
-#ifdef BlockForget
-#undef BlockForget
-#if( COMPILER_ARC )
-	#define	BlockForget( X )			do { *(X) = nil; } while( 0 )
-#else
-	#define	BlockForget( X )			ForgetCustom( X, _Block_release )	// Bypass poisoned Block_release
-#endif
-#endif
-
-#include "../mDNSMacOSX/strict.h"
+#include "../mDNSMacOSX/secure_coding/strict.h"
 
 #pragma mark -- Alloc --
 
@@ -84,30 +87,23 @@
 
 #define MDNS_DISPOSE_ADDRINFO STRICT_DISPOSE_ADDRINFO
 
-#pragma mark -- Poison --
+#define MDNS_DISPOSE_NW(obj) _MDNS_STRICT_DISPOSE_TEMPLATE(obj, nw_release)
 
-#if !defined(BUILD_TEXT_BASED_API) || BUILD_TEXT_BASED_API == 0
+#define MDNS_DISPOSE_SEC(obj) _MDNS_STRICT_DISPOSE_TEMPLATE(obj, sec_release)
 
-#if !MDNS_ALLOW_GOTO
+#define MDNS_DISPOSE_DNS_SERVICE_REF(obj) _MDNS_STRICT_DISPOSE_TEMPLATE(obj, DNSServiceRefDeallocate)
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wkeyword-macro"
-#define goto _Pragma("GCC error \"goto is forbidden - https://xkcd.com/292 \"")
-#pragma clang diagnostic pop
+#ifdef BlockForget
+// Redfine BlockForget to bypass poisoned Block_release
+#undef BlockForget
+#if( COMPILER_ARC )
+	#define	BlockForget( X )			do { *(X) = nil; } while( 0 )
+#else
+	#define	BlockForget( X )			ForgetCustom( X, _Block_release )
+#endif
+#endif
 
-#endif // !MDNS_ALLOW_GOTO
-
-#endif // defined(BUILD_TEXT_BASED_API) && BUILD_TEXT_BASED_API
-
-#else  // !MDNS_NO_STRICT && (TARGET_OS_OSX || TARGET_OS_IPHONE || TARGET_OS_SIMULATOR)
-
-#define _MDNS_STRICT_DISPOSE_TEMPLATE(ptr, function) \
-	do {                                        \
-		if ((ptr) != NULL) {                    \
-			function(ptr);                      \
-			(ptr) = NULL;                       \
-		}                                       \
-	} while(0)
+#else  // !MDNS_NO_STRICT
 
 #define mdns_malloc 			malloc
 #define mdns_calloc 			calloc
@@ -116,7 +112,10 @@
 	_MDNS_STRICT_DISPOSE_TEMPLATE(obj, free)
 
 
-#endif // !MDNS_NO_STRICT &&(TARGET_OS_OSX || TARGET_OS_IPHONE || TARGET_OS_SIMULATOR)
+#define MDNS_DISPOSE_DNS_SERVICE_REF(obj) _MDNS_STRICT_DISPOSE_TEMPLATE(obj, DNSServiceRefDeallocate)
+
+
+
+#endif // !MDNS_NO_STRICT
 
 #endif // __MDNS_STRICT_H__
-

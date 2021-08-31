@@ -16,3 +16,4 @@ Win32
 x64
 ARM64
 .depfile*
+BuildResults/

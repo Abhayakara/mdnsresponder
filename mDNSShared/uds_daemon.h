@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -79,9 +79,14 @@ typedef struct browser_t
 } browser_t;
 
 #ifdef _WIN32
+# ifdef __MINGW32__
+typedef int pid_t;
+typedef int socklen_t;
+# else
 typedef unsigned int pid_t;
-typedef unsigned int socklen_t;
-#endif
+typedef int socklen_t;
+# endif // __MINGW32__
+#endif //_WIN32
 
 #if (!defined(MAXCOMLEN))
 #define MAXCOMLEN 16
@@ -89,9 +94,11 @@ typedef unsigned int socklen_t;
 
 struct request_state
 {
-	request_state *next;
-	request_state *primary;         // If this operation is on a shared socket, pointer to primary
-	// request_state for the original DNSServiceCreateConnection() operation
+    request_state *next;            // For a shared connection, the next element in the list of subordinate
+                                    // requests on that connection. Otherwise null.
+    request_state *primary;         // For a subordinate request, the request that represents the shared
+                                    // connection to which this request is subordinate (must have been created
+                                    // by DNSServiceCreateConnection().
 	dnssd_sock_t sd;
 	pid_t process_id;               // Client's PID value
 	char  pid_name[MAXCOMLEN];      // Client's process name
@@ -113,10 +120,10 @@ struct request_state
 	transfer_state ts;
 	mDNSu32 hdr_bytes;              // bytes of header already read
 	ipc_msg_hdr hdr;
-	mDNSu32 data_bytes;             // bytes of message data already read
-	char          *msgbuf;          // pointer to data storage to pass to free()
-	const char    *msgptr;          // pointer to data to be read from (may be modified)
-	char          *msgend;          // pointer to byte after last byte of message
+	size_t data_bytes;              // bytes of message data already read
+	uint8_t       *msgbuf;          // pointer to data storage to pass to free()
+	const uint8_t *msgptr;          // pointer to data to be read from (may be modified)
+	const uint8_t *msgend;          // pointer to byte after last byte of message
 
 	// reply, termination, error, and client context info
 	int no_reply;                   // don't send asynchronous replies to client
@@ -155,7 +162,7 @@ struct request_state
 			mDNSBool autoname;              // Set if this name is tied to the Computer Name
 			mDNSBool autorename;            // Set if this client wants us to automatically rename on conflict
 			mDNSBool allowremotequery;      // Respond to unicast queries from outside the local link?
-			int num_subtypes;
+			mDNSu32 num_subtypes;
 			service_instance *instances;
 		} servicereg;
 		struct
@@ -196,7 +203,7 @@ typedef struct reply_state
 {
 	struct reply_state *next;       // If there are multiple unsent replies
 	mDNSu32 totallen;
-	mDNSu32 nwriten;
+	mDNSu32 nwritten;
 	ipc_msg_hdr mhdr[1];
 	reply_hdr rhdr[1];
 } reply_state;
@@ -222,7 +229,7 @@ extern void LogMcastStateInfo(mDNSBool mflag, mDNSBool start, mDNSBool mstatelog
 
 typedef void (*udsEventCallback)(int fd, void *context);
 extern mStatus udsSupportAddFDToEventLoop(dnssd_sock_t fd, udsEventCallback callback, void *context, void **platform_data);
-extern int     udsSupportReadFD(dnssd_sock_t fd, char* buf, int len, int flags, void *platform_data);
+extern ssize_t udsSupportReadFD(dnssd_sock_t fd, char* buf, mDNSu32 len, int flags, void *platform_data);
 extern mStatus udsSupportRemoveFDFromEventLoop(dnssd_sock_t fd, void *platform_data); // Note: This also CLOSES the file descriptor as well
 
 extern void RecordUpdatedNiceLabel(mDNSs32 delay);

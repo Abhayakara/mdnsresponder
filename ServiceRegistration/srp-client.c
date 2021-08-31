@@ -1,12 +1,12 @@
 /* srp-client.c
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <errno.h>
 #ifdef THREAD_DEVKIT
 #include "../mDNSShared/dns_sd.h"
 #else
@@ -342,8 +343,8 @@ srp_set_hostname(const char *NONNULL name, srp_hostname_conflict_callback_t call
 static bool
 srp_is_network_active(void)
 {
-    INFO("srp_is_network_active:  nsc = %d servers = %p interfaces = %p, hostname = " PRI_S_SRP,
-             network_state_changed, servers, interfaces,
+    INFO("nsc = %d servers = %p interfaces = %p, hostname = " PRI_S_SRP,
+          network_state_changed, servers, interfaces,
          current_client->hostname ? current_client->hostname : "<not set>");
     return servers != NULL && interfaces != NULL && current_client->hostname != NULL;
 }
@@ -634,7 +635,7 @@ static void
 update_finalize(update_context_t *update)
 {
     client_state_t *client = update->client;
-    INFO("update_finalize: %p %p %p", update, update->udp_context, update->message);
+    INFO("%p %p %p", update, update->udp_context, update->message);
     if (update->udp_context != NULL) {
         srp_deactivate_udp_context(client->os_context, update->udp_context);
     }
@@ -691,7 +692,7 @@ udp_retransmit(void *v_update_context)
     client = context->client;
 
     if (!srp_is_network_active()) {
-        INFO("udp_retransmit: network is down, discontinuing renewals.");
+        INFO("network is down, discontinuing renewals.");
         if (client->active_update != NULL) {
             update_finalize(client->active_update);
             client->active_update = NULL;
@@ -700,11 +701,11 @@ udp_retransmit(void *v_update_context)
     }
     // It shouldn't be possible for this to happen.
     if (client->active_update == NULL) {
-        INFO("udp_retransmit: no active update for " PRI_S_SRP " (%p).",
+        INFO("no active update for " PRI_S_SRP " (%p).",
              client->hostname ? client->hostname : "<null>", client);
         return;
     }
-    INFO("udp_retransmit: next_attempt %" PRIu32 " next_retransmission %" PRIu32 " for " PRI_S_SRP " (%p)",
+    INFO("next_attempt %" PRIu32 " next_retransmission %" PRIu32 " for " PRI_S_SRP " (%p)",
          context->next_attempt_time, context->next_retransmission_time,
          client->hostname ? client->hostname : "<null>", client);
 
@@ -827,7 +828,7 @@ udp_retransmit(void *v_update_context)
                              context->next_retransmission_time - 512 + srp_random16() % 1024, udp_retransmit);
     }
     if (err != kDNSServiceErr_NoError) {
-        INFO("udp_retransmit: error %d setting wakeup", err);
+        INFO("error %d setting wakeup", err);
         // what to do?
     }
 }
@@ -899,7 +900,7 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
     // server.
     err = srp_cancel_wakeup(client->os_context, context->udp_context);
     if (err != kDNSServiceErr_NoError) {
-        INFO("udp_response: %d", err);
+        INFO("%d", err);
     }
 
     if (rcode == dns_rcode_noerror || rcode == dns_rcode_yxdomain) {
@@ -1223,24 +1224,66 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
         //     TTL = 3600
         //     RDLENGTH = 2
         //     RDATA = service instance name
-        dns_name_to_wire(&p_service_name, &towire, reg->regtype == NULL ? service_type : reg->regtype); CH;
-        dns_pointer_to_wire(&p_service_name, &towire, &p_zone_name); CH;
-        dns_u16_to_wire(&towire, dns_rrtype_ptr); CH;
-        dns_u16_to_wire(&towire, dns_qclass_in); CH;
-        dns_ttl_to_wire(&towire, 3600); CH;
-        dns_rdlength_begin(&towire); CH;
-        if (reg->name != NULL) {
-            char *service_instance_name, *to_free = conflict_print(client, &towire, &service_instance_name, reg->name);
-            dns_name_to_wire(&p_service_instance_name, &towire, service_instance_name); CH;
-            if (to_free != NULL) {
-                free(to_free);
+
+        // Service registrations can have subtypes, in which case we need to send multiple PTR records, one for
+        // the main type and one for each subtype. Subtypes are represented in the regtype by following the
+        // primary service type with subtypes, separated by commas. So we have to parse through that to get
+        // the actual domain names to register.
+        const char *commap = reg->regtype == NULL ? service_type : reg->regtype;
+        dns_name_pointer_t p_sub_service_name;
+        bool primary = true;
+        do {
+            char regtype[DNS_MAX_LABEL_SIZE_ESCAPED + 6]; // plus NUL, ._sub
+            int i;
+            // Copy the next service type into regtype, ending when we hit the end of reg->regtype
+            // or when we hit a comma.
+            for (i = 0; *commap != '\0' && *commap != ',' && i < DNS_MAX_LABEL_SIZE_ESCAPED; i++) {
+                regtype[i] = *commap;
+                commap++;
             }
-        } else {
-            dns_name_to_wire(&p_service_instance_name, &towire, chosen_hostname); CH;
-        }
-        dns_pointer_to_wire(&p_service_instance_name, &towire, &p_service_name); CH;
-        dns_rdlength_end(&towire); CH;
-        INCREMENT(message->nscount);
+
+            // If we hit a comma, skip over the comma for the beginning of the next subtype.
+            if (*commap == ',') {
+                commap++;
+            }
+
+            // If we aren't at a NULL or a comma, it means that the label was too long, so the output
+            // is invalid.
+            else if (*commap != '\0') {
+                towire.error = ENOBUFS; CH;
+            }
+
+            // First time through, it's the base type, so emit the service name and a pointer to the
+            // zone name. Other times through, it's a subtype, so the pointer is now to the base type,
+            // and since the API makes ._sub implicit, we have to add that.
+            if (primary) {
+                regtype[i] = 0;
+                dns_name_to_wire(&p_service_name, &towire, regtype); CH;
+                dns_pointer_to_wire(&p_service_name, &towire, &p_zone_name); CH;
+            } else {
+                // Copy in the string and the NUL. We know there's space (see above).
+                memcpy(&regtype[i], "._sub", 6);
+                dns_name_to_wire(&p_sub_service_name, &towire, regtype); CH;
+                dns_pointer_to_wire(&p_sub_service_name, &towire, &p_service_name); CH;
+            }
+            dns_u16_to_wire(&towire, dns_rrtype_ptr); CH;
+            dns_u16_to_wire(&towire, dns_qclass_in); CH;
+            dns_ttl_to_wire(&towire, 3600); CH;
+            dns_rdlength_begin(&towire); CH;
+            if (reg->name != NULL) {
+                char *service_instance_name, *to_free = conflict_print(client, &towire, &service_instance_name, reg->name);
+                dns_name_to_wire(&p_service_instance_name, &towire, service_instance_name); CH;
+                if (to_free != NULL) {
+                    free(to_free);
+                }
+            } else {
+                dns_name_to_wire(&p_service_instance_name, &towire, chosen_hostname); CH;
+            }
+            dns_pointer_to_wire(&p_service_instance_name, &towire, &p_service_name); CH;
+            dns_rdlength_end(&towire); CH;
+            INCREMENT(message->nscount);
+            primary = false;
+        } while (*commap != '\0');
 
         // Service Instance:
         //   * Delete all RRsets from service instance name
@@ -1390,7 +1433,7 @@ do_srp_update(client_state_t *client, bool definite, bool *did_something)
             }
         }
         if (!interface_changed && !server_changed) {
-            INFO("do_srp_update: addresses to register are the same; server is the same.");
+            INFO("addresses to register are the same; server is the same.");
             return kDNSServiceErr_NoError;
         }
     }
@@ -1468,7 +1511,7 @@ srp_deregister(void *os_context)
     }
 
     if (client->active_update == NULL) {
-        INFO("srp_deregister: no active update.");
+        INFO("no active update.");
         return kDNSServiceErr_NoSuchRecord;
     }
 

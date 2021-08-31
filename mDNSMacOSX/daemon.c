@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil -*-
  *
- * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+#include <AssertMacros.h>
 #include <mach/mach.h>
 #include <mach/mach_error.h>
 #include <sys/types.h>
@@ -43,10 +44,9 @@
 #include "xpc_service_dns_proxy.h"
 #include "xpc_service_log_utility.h"
 #include "helper.h"
-#include "posix_utilities.h"        // for getLocalTimestamp()
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, METRICS)
-#include "Metrics.h"
+#if MDNSRESPONDER_SUPPORTS(APPLE, ANALYTICS)
+#include "dnssd_analytics.h"
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSD_XPC_SERVICE)
@@ -58,14 +58,19 @@
 #include "QuerierSupport.h"
 #endif
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, RESOLVED_SYMPTOM)
+#if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
 #include "resolved_cache.h"
 #endif
 
+#include <mdns/power.h>
 #include "mdns_strict.h"
 
 #ifndef USE_SELECT_WITH_KQUEUEFD
 #define USE_SELECT_WITH_KQUEUEFD 0
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, CACHE_MEM_LIMIT)
+#include <os/feature_private.h>
 #endif
 
 // Used on OSX(10.11.x onwards) for manipulating mDNSResponder program arguments
@@ -101,10 +106,6 @@ extern mDNSBool AlwaysAppendSearchDomains;
 extern mDNSBool EnableAllowExpired;
 mDNSexport void INFOCallback(void);
 mDNSexport void dump_state_to_fd(int fd);
-
-#if MDNSRESPONDER_SUPPORTS(APPLE, PREALLOCATED_CACHE)
-static mDNSBool PreallocateCacheMemory = mDNSfalse;
-#endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, CACHE_MEM_LIMIT)
 #define kRRCacheMemoryLimit 1000000 // For now, we limit the cache to at most 1MB on iOS devices.
@@ -322,10 +323,10 @@ mDNSexport void dump_state_to_fd(int fd)
     DNSServer *s;
 #endif
     McastResolver *mr;
-    char timestamp[64]; // 64 is enough to store the UTC timestmp
+    char timestamp[MIN_TIMESTAMP_STRING_LENGTH];
 
     LogToFD(fd, "---- BEGIN STATE LOG ---- %s %s %d", mDNSResponderVersionString, OSXVers ? "OSXVers" : "iOSVers", OSXVers ? OSXVers : iOSVers);
-    getLocalTimestamp(timestamp, sizeof(timestamp));
+    getLocalTimestampNow(timestamp, sizeof(timestamp));
     LogToFD(fd, "Date: %s", timestamp);
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "---- BEGIN STATE LOG ---- (" PUB_S ")", timestamp);
 
@@ -395,13 +396,13 @@ mDNSexport void dump_state_to_fd(int fd)
         const mdns_dns_service_manager_t manager = Querier_GetDNSServiceManager();
         if (manager)
         {
-            mdns_dns_service_manager_iterate(manager,
+            mdns_dns_service_manager_enumerate(manager,
             ^ bool (const mdns_dns_service_t service)
             {
                 char *desc = mdns_copy_description(service);
                 LogToFD(fd, "%s", desc ? desc : "<missing description>");
                 mdns_free(desc);
-                return false;
+                return true;
             });
         }
     }
@@ -484,11 +485,10 @@ mDNSexport void dump_state_to_fd(int fd)
         LogToFD(fd, "%##s", mDNSStorage.FQDN.c);
     }
 
-    #if MDNSRESPONDER_SUPPORTS(APPLE, METRICS)
-        LogMetricsToFD(fd);
+    #if MDNSRESPONDER_SUPPORTS(APPLE, ANALYTICS)
+        dnssd_analytics_log(fd);
     #endif
 
-//    getLocalTimestamp(timestamp, sizeof(timestamp));
     LogToFD(fd, "Date: %s", timestamp);
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "---- END STATE LOG ---- (" PUB_S ")", timestamp);
     LogToFD(fd, "----  END STATE LOG  ---- %s %s %d", mDNSResponderVersionString, OSXVers ? "OSXVers" : "iOSVers", OSXVers ? OSXVers : iOSVers);
@@ -633,8 +633,8 @@ mDNSlocal kern_return_t mDNSDaemonInitialize(void)
         return(err);
     }
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, PREALLOCATED_CACHE)
-    if (PreallocateCacheMemory)
+#if MDNSRESPONDER_SUPPORTS(APPLE, CACHE_MEM_LIMIT)
+    if (os_feature_enabled(mDNSResponder, preallocated_cache))
     {
         const int growCount = (kRRCacheMemoryLimit + kRRCacheGrowSize - 1) / kRRCacheGrowSize;
         int i;
@@ -796,7 +796,8 @@ mDNSlocal mDNSs32 mDNSDaemonIdle(mDNS *const m)
     if (m->p->RequestReSleep && now - m->p->RequestReSleep >= 0)
     {
         m->p->RequestReSleep = 0;
-        mDNSPowerRequest(0, 0);
+        mdns_power_cancel_all_events(kMDNSResponderID);
+        mDNSPowerSleepSystem();
     }
 
     // 3. Call mDNS_Execute() to let mDNSCore do what it needs to do
@@ -842,6 +843,10 @@ mDNSlocal mDNSs32 mDNSDaemonIdle(mDNS *const m)
     return(nextevent);
 }
 
+
+#define MDNSU32_MAX_DBL 4294967295.0
+check_compile_time(((mDNSu32)MDNSU32_MAX_DBL) == ((mDNSu32)-1));
+
 // Right now we consider *ALL* of our DHCP leases
 // It might make sense to be a bit more selective and only consider the leases on interfaces
 // (a) that are capable and enabled for wake-on-LAN, and
@@ -850,73 +855,79 @@ mDNSlocal mDNSs32 mDNSDaemonIdle(mDNS *const m)
 mDNSlocal mDNSu32 DHCPWakeTime(void)
 {
     mDNSu32 e = 24 * 3600;      // Maximum maintenance wake interval is 24 hours
-    const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-    if (!now) LogMsg("DHCPWakeTime: CFAbsoluteTimeGetCurrent failed");
-    else
+    CFIndex ic, j;
+
+    const void *pattern = SCDynamicStoreKeyCreateNetworkServiceEntity(NULL, kSCDynamicStoreDomainState, kSCCompAnyRegex, kSCEntNetDHCP);
+    if (!pattern)
     {
-        CFIndex ic, j;
-
-        const void *pattern = SCDynamicStoreKeyCreateNetworkServiceEntity(NULL, kSCDynamicStoreDomainState, kSCCompAnyRegex, kSCEntNetDHCP);
-        if (!pattern)
+        LogMsg("DHCPWakeTime: SCDynamicStoreKeyCreateNetworkServiceEntity failed\n");
+        return e;
+    }
+    CFArrayRef dhcpinfo = CFArrayCreate(NULL, (const void **)&pattern, 1, &kCFTypeArrayCallBacks);
+    MDNS_DISPOSE_CF_OBJECT(pattern);
+    if (dhcpinfo)
+    {
+        SCDynamicStoreRef store = SCDynamicStoreCreate(NULL, CFSTR("DHCP-LEASES"), NULL, NULL);
+        if (store)
         {
-            LogMsg("DHCPWakeTime: SCDynamicStoreKeyCreateNetworkServiceEntity failed\n");
-            return e;
-        }
-        CFArrayRef dhcpinfo = CFArrayCreate(NULL, (const void **)&pattern, 1, &kCFTypeArrayCallBacks);
-        MDNS_DISPOSE_CF_OBJECT(pattern);
-        if (dhcpinfo)
-        {
-            SCDynamicStoreRef store = SCDynamicStoreCreate(NULL, CFSTR("DHCP-LEASES"), NULL, NULL);
-            if (store)
+            CFDictionaryRef dict = SCDynamicStoreCopyMultiple(store, NULL, dhcpinfo);
+            if (dict)
             {
-                CFDictionaryRef dict = SCDynamicStoreCopyMultiple(store, NULL, dhcpinfo);
-                if (dict)
+                ic = CFDictionaryGetCount(dict);
+                CFDictionaryRef *vals = NULL;
+                if (ic > 0)
                 {
-                    ic = CFDictionaryGetCount(dict);
-                    CFDictionaryRef *vals = NULL;
-                    if (ic > 0)
-                    {
-                        vals = (CFDictionaryRef *)mdns_calloc(ic, sizeof(*vals));
-                    }
-                    if (vals)
-                    {
-                        CFDictionaryGetKeysAndValues(dict, NULL, (const void **)vals);
+                    vals = (CFDictionaryRef *)mdns_calloc((size_t)ic, sizeof(*vals));
+                }
+                if (vals)
+                {
+                    CFDictionaryGetKeysAndValues(dict, NULL, (const void **)vals);
 
-                        for (j = 0; j < ic; j++)
+                    for (j = 0; j < ic; j++)
+                    {
+                        const CFDictionaryRef dhcp = vals[j];
+                        if (dhcp)
                         {
-                            const CFDictionaryRef dhcp = vals[j];
-                            if (dhcp)
+                            const CFDateRef start = DHCPInfoGetLeaseStartTime(dhcp);
+                            const CFDataRef lease = DHCPInfoGetOptionData(dhcp, 51);    // Option 51 = IP Address Lease Time
+                            if (!start || !lease || CFDataGetLength(lease) < 4)
+                                LogMsg("DHCPWakeTime: SCDynamicStoreCopyDHCPInfo index %d failed "
+                                       "CFDateRef start %p CFDataRef lease %p CFDataGetLength(lease) %d",
+                                       j, start, lease, lease ? CFDataGetLength(lease) : 0);
+                            else
                             {
-                                const CFDateRef start = DHCPInfoGetLeaseStartTime(dhcp);
-                                const CFDataRef lease = DHCPInfoGetOptionData(dhcp, 51);    // Option 51 = IP Address Lease Time
-                                if (!start || !lease || CFDataGetLength(lease) < 4)
-                                    LogMsg("DHCPWakeTime: SCDynamicStoreCopyDHCPInfo index %d failed "
-                                           "CFDateRef start %p CFDataRef lease %p CFDataGetLength(lease) %d",
-                                           j, start, lease, lease ? CFDataGetLength(lease) : 0);
+                                const UInt8 *d = CFDataGetBytePtr(lease);
+                                if (!d) LogMsg("DHCPWakeTime: CFDataGetBytePtr %ld failed", (long)j);
                                 else
                                 {
-                                    const UInt8 *d = CFDataGetBytePtr(lease);
-                                    if (!d) LogMsg("DHCPWakeTime: CFDataGetBytePtr %ld failed", (long)j);
+                                    mDNSu32 elapsed;
+                                    const CFAbsoluteTime now  = CFAbsoluteTimeGetCurrent();
+                                    const CFAbsoluteTime diff = now - CFDateGetAbsoluteTime(start);
+                                    if (isgreaterequal(diff, 0.0))
+                                    {
+                                        const mDNSu32 elapsedMax = (mDNSu32)-1;
+                                        elapsed = (islessequal(diff, MDNSU32_MAX_DBL)) ? ((mDNSu32)diff) : elapsedMax;
+                                    }
                                     else
                                     {
-                                        const mDNSu32 elapsed   = now - CFDateGetAbsoluteTime(start);
-                                        const mDNSu32 lifetime  = (mDNSs32) ((mDNSs32)d[0] << 24 | (mDNSs32)d[1] << 16 | (mDNSs32)d[2] << 8 | d[3]);
-                                        const mDNSu32 remaining = lifetime - elapsed;
-                                        const mDNSu32 wake      = remaining > 60 ? remaining - remaining/10 : 54;   // Wake at 90% of the lease time
-                                        LogSPS("DHCP Address Lease Elapsed %6u Lifetime %6u Remaining %6u Wake %6u", elapsed, lifetime, remaining, wake);
-                                        if (e > wake) e = wake;
+                                        elapsed = 0;
                                     }
+                                    const mDNSu32 lifetime  = (((mDNSu32)d[0]) << 24) | (((mDNSu32)d[1]) << 16) | (((mDNSu32)d[2]) << 8) | ((mDNSu32)d[3]);
+                                    const mDNSu32 remaining = (elapsed <= lifetime) ? (lifetime - elapsed) : 0;
+                                    const mDNSu32 wake      = remaining > 60 ? remaining - remaining/10 : 54;   // Wake at 90% of the lease time
+                                    LogSPS("DHCP Address Lease Elapsed %6u Lifetime %6u Remaining %6u Wake %6u", elapsed, lifetime, remaining, wake);
+                                    if (e > wake) e = wake;
                                 }
                             }
                         }
-                        mdns_free(vals);
                     }
-                    MDNS_DISPOSE_CF_OBJECT(dict);
+                    mdns_free(vals);
                 }
-                MDNS_DISPOSE_CF_OBJECT(store);
+                MDNS_DISPOSE_CF_OBJECT(dict);
             }
-            MDNS_DISPOSE_CF_OBJECT(dhcpinfo);
+            MDNS_DISPOSE_CF_OBJECT(store);
         }
+        MDNS_DISPOSE_CF_OBJECT(dhcpinfo);
     }
     return(e);
 }
@@ -951,13 +962,13 @@ mDNSlocal mDNSBool AllowSleepNow(mDNSs32 now)
                    mDNSCoreHaveAdvertisedMulticastServices(m) ? "have" : "no");
         else
         {
-            mDNSs32 dhcp = DHCPWakeTime();
+            const mDNSu32 dhcp = DHCPWakeTime();
             LogSPS("ComputeWakeTime: DHCP Wake %d", dhcp);
             mDNSNextWakeReason reason = mDNSNextWakeReason_Null;
             mDNSs32 interval = mDNSCoreIntervalToNextWake(m, now, &reason) / mDNSPlatformOneSecond;
-            if (interval > dhcp)
+            if ((interval >= 0) && (((mDNSu32)interval) > dhcp))
             {
-                interval = dhcp;
+                interval = (mDNSs32)dhcp;
                 reason = mDNSNextWakeReason_DHCPLeaseRenewal;
             }
             // If we're not ready to sleep (failed to register with Sleep Proxy, maybe because of
@@ -1030,8 +1041,8 @@ mDNSlocal mDNSBool AllowSleepNow(mDNSs32 now)
                 if (interval < 60)
                     interval = 60;
 
-                result = mDNSPowerRequest(1, interval);
-
+                mdns_power_cancel_all_events(kMDNSResponderID);
+                result = mdns_power_schedule_wake(kMDNSResponderID, interval, 0);
                 if (result == kIOReturnNotReady)
                 {
                     int r;
@@ -1046,7 +1057,7 @@ mDNSlocal mDNSBool AllowSleepNow(mDNSs32 now)
                     do
                     {
                         interval += (interval < 20) ? 1 : ((interval+3) / 4);
-                        r = mDNSPowerRequest(1, interval);
+                        r = mdns_power_schedule_wake(kMDNSResponderID, interval, 0);
                     }
                     while (r == kIOReturnNotReady);
                     if (r) LogMsg("AllowSleepNow: Requested wakeup in %d seconds unsuccessful: %d %X", interval, r, r);
@@ -1206,9 +1217,6 @@ mDNSlocal void * KQueueLoop(void *m_param)
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSD_XPC_SERVICE)
     dnssd_server_init();
 #endif
-#if MDNSRESPONDER_SUPPORTS(APPLE, RESOLVED_SYMPTOM)
-    resolved_cache_idle();
-#endif
     pthread_mutex_lock(&PlatformStorage.BigMutex);
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "Starting time value 0x%08X (%d)", (mDNSu32)mDNSStorage.timenow_last, mDNSStorage.timenow_last);
 
@@ -1228,6 +1236,9 @@ mDNSlocal void * KQueueLoop(void *m_param)
         mDNSs32 nextTimerEvent = udsserver_idle(mDNSDaemonIdle(m));
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSD_XPC_SERVICE)
         dnssd_server_idle();
+#endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
+        resolved_cache_idle();
 #endif
 #if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
         if (m->DNSPushServers != mDNSNULL)
@@ -1427,7 +1438,7 @@ mDNSlocal void SandboxProcess(void)
 #define MDNS_OS_LOG_CATEGORY_INIT(NAME) \
     do\
     { \
-        mDNSLogCategory_ ## NAME = os_log_create("com.apple.mDNSResponder", # NAME ); \
+        mDNSLogCategory_ ## NAME = os_log_create(kMDNSResponderIDStr, # NAME ); \
         if (!mDNSLogCategory_ ## NAME ) \
         { \
             os_log_error(OS_LOG_DEFAULT, "Could NOT create the " # NAME " log handle in mDNSResponder"); \
@@ -1458,6 +1469,10 @@ mDNSlocal void init_logging(void)
     MDNS_OS_LOG_CATEGORY_INIT(Analytics);
     MDNS_OS_LOG_CATEGORY_INIT(DNSSEC);
 }
+#endif
+
+#ifdef FUZZING
+#define main daemon_main
 #endif
 
 mDNSexport int main(int argc, char **argv)
@@ -1519,12 +1534,9 @@ mDNSexport int main(int argc, char **argv)
 
 
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, PREALLOCATED_CACHE)
-    PreallocateCacheMemory    = PreferencesGetValueBool(kPreferencesKey_PreallocateCacheMemory,    PreallocateCacheMemory);
-#endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     PQWorkaroundThreshold     = PreferencesGetValueInt(kPreferencesKey_PQWorkaroundThreshold,      PQWorkaroundThreshold);
-    CFDictionaryRef managedDefaults = mdns_managed_defaults_create("com.apple.mDNSResponder", NULL);
+    CFDictionaryRef managedDefaults = mdns_managed_defaults_create(kMDNSResponderIDStr, NULL);
     if (managedDefaults)
     {
         PQWorkaroundThreshold = mdns_managed_defaults_get_int_clamped(managedDefaults,
@@ -1596,11 +1608,6 @@ mDNSexport int main(int argc, char **argv)
     if (useSandbox)
 #endif
     SandboxProcess();
-
-#if MDNSRESPONDER_SUPPORTS(APPLE, METRICS)
-    status = MetricsInit();
-    if (status) { LogMsg("Daemon start: MetricsInit failed (%d)", status); }
-#endif
 
     status = mDNSDaemonInitialize();
     if (status) { LogMsg("Daemon start: mDNSDaemonInitialize failed"); goto exit; }
@@ -1697,10 +1704,10 @@ mDNSexport mStatus udsSupportAddFDToEventLoop(int fd, udsEventCallback callback,
     return mStatus_BadParamErr;
 }
 
-int udsSupportReadFD(dnssd_sock_t fd, char *buf, int len, int flags, void *platform_data)
+ssize_t udsSupportReadFD(dnssd_sock_t fd, char *buf, mDNSu32 len, int flags, void *platform_data)
 {
     (void) platform_data;
-    return (int)recv(fd, buf, len, flags);
+    return recv(fd, buf, len, flags);
 }
 
 mDNSexport mStatus udsSupportRemoveFDFromEventLoop(int fd, void *platform_data)     // Note: This also CLOSES the file descriptor

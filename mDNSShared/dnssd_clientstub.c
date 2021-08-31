@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2003-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -26,8 +26,11 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "dnssd_clientstub.h"
+
 #include <errno.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #include "dnssd_ipc.h"
 
@@ -86,11 +89,6 @@ static void syslog( int priority, const char * message, ...)
 
 #endif
 
-#if CHECK_BUNDLE_VERSION
-#include "bundle_utilities.h"
-#include <os/feature_private.h>
-#endif
-
 #if defined(_WIN32)
 // <rdar://problem/4096913> Specifies how many times we'll try and connect to the server.
 
@@ -132,7 +130,7 @@ typedef struct
 #endif
 
 // client stub callback to process message from server and deliver results to client application
-typedef void (*ProcessReplyFn)(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *msg, const char *const end);
+typedef void (*ProcessReplyFn)(DNSServiceOp *sdr, const CallbackHeader *cbh, const uint8_t *msg, const uint8_t *end);
 
 #define ValidatorBits 0x12345678
 #define DNSServiceRefValid(X) (dnssd_SocketValid((X)->sockfd) && (((X)->sockfd ^ (X)->validator) == ValidatorBits))
@@ -145,12 +143,22 @@ typedef void (*ProcessReplyFn)(DNSServiceOp *const sdr, const CallbackHeader *co
 // DNSServiceSetDispatchQueue API. Hence any new code guarded with _DNS_SD_LIBDISPATCH should still be backwards compatible.
 struct _DNSServiceRef_t
 {
-    DNSServiceOp     *next;             // For shared connection
-    DNSServiceOp     *primary;          // For shared connection
+    DNSServiceOp     *next;             // When sharing a connection, this is the next subordinate DNSServiceRef in
+                                        // the list. The connection being shared is the first in the list.
+    DNSServiceOp     *primary;          // When sharing a connection, the primary pointer of each subordinate
+                                        // DNSServiceRef points to the head of the list. If primary is null, and next is
+                                        // null, this is not a shared connection. If primary is null and next is
+                                        // non-null, this is the primary DNSServiceRef of the shared connection. If
+                                        // primary is non-null, this is a subordinate DNSServiceRef for the connection
+                                        // that is managed by the DNSServiceRef pointed to by primary.
     dnssd_sock_t sockfd;                // Connected socket between client and daemon
     dnssd_sock_t validator;             // Used to detect memory corruption, double disposals, etc.
     client_context_t uid;               // For shared connection requests, each subordinate DNSServiceRef has its own ID,
-                                        // unique within the scope of the same shared parent DNSServiceRef
+                                        // unique within the scope of the same shared parent DNSServiceRef. On the
+                                        // primary DNSServiceRef, uid matches the uid of the most recently allocated
+                                        // subordinate DNSServiceRef. Each time a new subordinate DNSServiceRef is
+                                        // allocated, uid on the primary is incremented by one and copied to the
+                                        // subordinate.
     uint32_t op;                        // request_op_t or reply_op_t
     uint32_t max_index;                 // Largest assigned record index - 0 if no additional records registered
     uint32_t logcounter;                // Counter used to control number of syslog messages we write
@@ -166,29 +174,43 @@ struct _DNSServiceRef_t
     void             *kacontext;
 };
 
+// Any DNSServiceRef can have a list of one or more DNSRecordRefs. These DNSRecordRefs either come from
+// DNSServiceRegisterRecord calls on a DNSServiceRef allocated using DNSServiceCreateConnection, or else
+// they come from DNSServiceAddRecord calls on a DNSServiceRef allocated using DNSServiceRegisterRecord.
+// A connection created using DNSServiceCreateConnection can also be used as a shared connection for registering
+// services using DNSServiceRegister. Or a connection can have both records registered with
+// DNSServiceRegisterRecord and services registered with DNSServiceRegister. A shared connection can also have
+// browses, resolves, and so on, each of which will have a subordinate DNSServiceRef.
+// This data structure is mirrored in the server daemon. To summarize:
+// For any given DNSServiceRef created by DNSServiceCreateConnection,
+//   - there may be zero or more subordinate DNSServiceRefs.
+//   - there may be zero or more DNSRecordRefs
+// Any DNSServiceRef created by DNSServiceRegister may
+//   - be a subordinate DNSServiceRef of a DNSServiceRef created by DNSServiceCreateConnection, or not
+//   - be a standalone DNSServiceRef with its own connection
+//   - may have zero or more records registered with DNSServiceAddRecord
+//   - may not have any records registered with DNSServiceRegisterRecord
+//   - may not be used as a shared connection
+
 struct _DNSRecordRef_t
 {
     DNSRecord       *recnext;
     void *AppContext;
     DNSServiceRegisterRecordReply AppCallback;
     DNSRecordRef recref;
-    uint32_t record_index;  // index is unique to the ServiceDiscoveryRef
-    client_context_t uid;  // For demultiplexing multiple DNSServiceRegisterRecord calls
+    uint32_t record_index;  // index is unique within the set of DNSRecordRefs owned by its parent (sdr).
+    client_context_t uid;   // a copy of sdr->uid made when the recordref is created. if sdr is a shared
+                            // connection, this may not match sdr->uid later on. If it is a subordinate
+                            // connection or a non-shared connection, then sdr->uid should always match
+                            // uid.
     DNSServiceOp *sdr;
 };
 
-#if CHECK_BUNDLE_VERSION
 static bool _should_return_noauth_error(void)
 {
-    static dispatch_once_t  s_once      = 0;
-    static bool        s_should    = false;
-    dispatch_once(&s_once,
-    ^{
-        s_should = bundle_sdk_is_ios14_or_later();
-    });
+    static bool s_should = false;
     return s_should;
 }
-#endif
 
 #if !defined(USE_TCP_LOOPBACK)
 static void SetUDSPath(struct sockaddr_un *saddr, const char *path)
@@ -248,7 +270,7 @@ static int write_all(dnssd_sock_t sd, char *buf, size_t len)
 enum { read_all_success = 0, read_all_fail = -1, read_all_wouldblock = -2, read_all_defunct = -3 };
 
 // Read len bytes. Return 0 on success, read_all_fail on error, or read_all_wouldblock for
-static int read_all(dnssd_sock_t sd, char *buf, int len)
+static int read_all(const dnssd_sock_t sd, uint8_t *buf, size_t len)
 {
     // Don't use "MSG_WAITALL"; it returns "Invalid argument" on some Linux versions; use an explicit while() loop instead.
     //if (recv(sd, buf, len, MSG_WAITALL) != len) return -1;
@@ -263,7 +285,7 @@ static int read_all(dnssd_sock_t sd, char *buf, int len)
             syslog(LOG_INFO, "dnssd_clientstub read_all: EINTR continue"); 
             continue; 
         }
-        if ((num_read == 0) || (num_read < 0) || (num_read > len))
+        if ((num_read == 0) || (num_read < 0) || (((size_t)num_read) > len))
         {
             int printWarn = 0;
             int defunct = 0;
@@ -388,9 +410,9 @@ static int set_waitlimit(dnssd_sock_t sock, int timeout)
  * if zero, the path to a control socket is appended at the beginning of the message buffer.
  * data_start is set past this string.
  */
-static ipc_msg_hdr *create_hdr(uint32_t op, size_t *len, char **data_start, int SeparateReturnSocket, DNSServiceOp *ref)
+static ipc_msg_hdr *create_hdr(uint32_t op, size_t *len, uint8_t **data_start, int SeparateReturnSocket, DNSServiceOp *ref)
 {
-    char *msg = NULL;
+    uint8_t *msg = NULL;
     ipc_msg_hdr *hdr;
     int datalen;
 #if !defined(USE_TCP_LOOPBACK)
@@ -417,7 +439,7 @@ static ipc_msg_hdr *create_hdr(uint32_t op, size_t *len, char **data_start, int 
     *len += sizeof(ipc_msg_hdr);
 
     // Write message to buffer
-    msg = mdns_malloc(*len);
+    msg = (uint8_t *)mdns_malloc(*len);
     if (!msg) { syslog(LOG_WARNING, "dnssd_clientstub create_hdr: malloc failed"); return NULL; }
 
     memset(msg, 0, *len);
@@ -526,10 +548,13 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
         g_initWinsock = 1;
         if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0) { *ref = NULL; return kDNSServiceErr_ServiceNotRunning; }
     }
+
+#ifndef WIN32_CENTENNIAL
     // <rdar://problem/4096913> If the system service is disabled, we only want to try to connect once
     if (IsSystemServiceDisabled())
         NumTries = DNSSD_CLIENT_MAXTRIES;
     #endif
+#endif
 
     sdr = mdns_malloc(sizeof(DNSServiceOp));
     if (!sdr) 
@@ -621,7 +646,7 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
         #if defined(USE_TCP_LOOPBACK)
         saddr.sin_family      = AF_INET;
         saddr.sin_addr.s_addr = inet_addr(MDNS_TCP_SERVERADDR);
-        saddr.sin_port        = htons(MDNS_TCP_SERVERPORT);
+        saddr.sin_port        = IsSystemServiceDisabled() ? htons(MDNS_TCP_SERVERPORT_CENTENNIAL) : htons(MDNS_TCP_SERVERPORT);
         #else
         saddr.sun_family      = AF_LOCAL;
         SetUDSPath(&saddr, uds_serverpath);
@@ -637,7 +662,15 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
         #if defined(_WIN32)
         while (1)
         {
-            int err = connect(sdr->sockfd, (struct sockaddr *) &saddr, sizeof(saddr));
+#ifdef WIN32_CENTENNIAL
+            char port[128];
+            // Access to the process environment block is thread-safe
+            if (GetEnvironmentVariableA("MDNS_TCP_SERVERPORT_CENTENNIAL", port, sizeof(port)))
+            {
+                saddr.sin_port = htons((u_short)atoi(port));
+            }
+#endif
+            int err = connect(sdr->sockfd, (struct sockaddr*)&saddr, sizeof(saddr));
             if (!err)
                 break; // If we succeeded, return sdr
 
@@ -919,7 +952,7 @@ static DNSServiceErrorType deliver_request(ipc_msg_hdr *hdr, DNSServiceOp *sdr)
         err = kDNSServiceErr_NoError;
     else if ((err = set_waitlimit(errsd, DNSSD_CLIENT_TIMEOUT)) == kDNSServiceErr_NoError)
     {
-        ioresult = read_all(errsd, (char*)&err, (int)sizeof(err));
+        ioresult = read_all(errsd, (uint8_t *)&err, (int)sizeof(err));
         if (ioresult < read_all_success)
             err = (ioresult == read_all_defunct) ? kDNSServiceErr_DefunctConnection : kDNSServiceErr_ServiceNotRunning; // On failure read_all will have written a message to syslog for us
         else
@@ -1067,7 +1100,7 @@ DNSServiceErrorType DNSSD_API DNSServiceProcessResult(DNSServiceRef sdRef)
     do
     {
         CallbackHeader cbh;
-        char *data;
+        uint8_t *data;
 
         // return NoError on EWOULDBLOCK. This will handle the case
         // where a non-blocking socket is told there is data, but it was a false positive.
@@ -1142,7 +1175,7 @@ DNSServiceErrorType DNSSD_API DNSServiceProcessResult(DNSServiceRef sdRef)
         }
         else
         {
-            const char *ptr = data;
+            const uint8_t *ptr = data;
             cbh.cb_flags     = get_flags     (&ptr, data + cbh.ipc_hdr.datalen);
             cbh.cb_interface = get_uint32    (&ptr, data + cbh.ipc_hdr.datalen);
             cbh.cb_err       = get_error_code(&ptr, data + cbh.ipc_hdr.datalen);
@@ -1192,7 +1225,7 @@ void DNSSD_API DNSServiceRefDeallocate(DNSServiceRef sdRef)
         while (*p && *p != sdRef) p = &(*p)->next;
         if (*p)
         {
-            char *ptr;
+            uint8_t *ptr;
             size_t len = 0;
             ipc_msg_hdr *hdr = create_hdr(cancel_request, &len, &ptr, 0, sdRef);
             if (hdr)
@@ -1251,7 +1284,7 @@ void DNSSD_API DNSServiceRefDeallocate(DNSServiceRef sdRef)
 DNSServiceErrorType DNSSD_API DNSServiceGetProperty(const char *property, void *result, uint32_t *size)
 {
     DNSServiceErrorType err;
-    char *ptr;
+    uint8_t *ptr;
     size_t len;
     ipc_msg_hdr *hdr;
     DNSServiceOp *tmp;
@@ -1272,12 +1305,12 @@ DNSServiceErrorType DNSSD_API DNSServiceGetProperty(const char *property, void *
     err = deliver_request(hdr, tmp);        // Will free hdr for us
     if (err) { DNSServiceRefDeallocate(tmp); return err; }
 
-    ioresult = read_all(tmp->sockfd, (char*)&actualsize, (int)sizeof(actualsize));
+    ioresult = read_all(tmp->sockfd, (uint8_t *)&actualsize, sizeof(actualsize));
     if (ioresult < read_all_success)
     { DNSServiceRefDeallocate(tmp); return (ioresult == read_all_defunct) ? kDNSServiceErr_DefunctConnection : kDNSServiceErr_ServiceNotRunning; }
 
     actualsize = ntohl(actualsize);
-    ioresult = read_all(tmp->sockfd, (char*)result, actualsize < *size ? actualsize : *size);
+    ioresult = read_all(tmp->sockfd, (uint8_t *)result, actualsize < *size ? actualsize : *size);
     if (ioresult < read_all_success)
     { DNSServiceRefDeallocate(tmp); return (ioresult == read_all_defunct) ? kDNSServiceErr_DefunctConnection : kDNSServiceErr_ServiceNotRunning; }
     DNSServiceRefDeallocate(tmp);
@@ -1292,7 +1325,7 @@ DNSServiceErrorType DNSSD_API DNSServiceGetProperty(const char *property, void *
 
 DNSServiceErrorType DNSSD_API DNSServiceGetPID(const uint16_t srcport, int32_t *pid)
 {
-    char *ptr;
+    uint8_t *ptr;
     ipc_msg_hdr *hdr;
     DNSServiceOp *tmp = NULL;
     size_t len = sizeof(int32_t);
@@ -1308,7 +1341,7 @@ DNSServiceErrorType DNSSD_API DNSServiceGetPID(const uint16_t srcport, int32_t *
     err = deliver_request(hdr, tmp);        // Will free hdr for us
     if (err) { DNSServiceRefDeallocate(tmp); return err; }
 
-    ioresult = read_all(tmp->sockfd, (char*)pid, sizeof(int32_t));
+    ioresult = read_all(tmp->sockfd, (uint8_t *)pid, sizeof(int32_t));
     if (ioresult < read_all_success)
     { DNSServiceRefDeallocate(tmp); return (ioresult == read_all_defunct) ? kDNSServiceErr_DefunctConnection : kDNSServiceErr_ServiceNotRunning; }
 
@@ -1316,7 +1349,7 @@ DNSServiceErrorType DNSSD_API DNSServiceGetPID(const uint16_t srcport, int32_t *
     return kDNSServiceErr_NoError;
 }
 
-static void handle_resolve_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *end)
+static void handle_resolve_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const uint8_t *data, const uint8_t *const end)
 {
     char fullname[kDNSServiceMaxDomainName];
     char target[kDNSServiceMaxDomainName];
@@ -1341,34 +1374,6 @@ fail:
     syslog(LOG_WARNING, "dnssd_clientstub handle_resolve_response: error reading result from daemon");
 }
 
-#if TARGET_OS_IPHONE
-
-static int32_t libSystemVersion = 0;
-
-// Return true if the iOS application linked against a version of libsystem where P2P
-// interfaces were included by default when using kDNSServiceInterfaceIndexAny.
-// Using 160.0.0 == 0xa00000 as the version threshold.
-static int includeP2PWithIndexAny()
-{
-    if (libSystemVersion == 0)
-        libSystemVersion = NSVersionOfLinkTimeLibrary("System");
-
-    if (libSystemVersion < 0xa00000)
-        return 1;
-    else
-        return 0;
-}
-
-#else   // TARGET_OS_IPHONE
-
-// always return false for non iOS platforms
-static int includeP2PWithIndexAny()
-{
-    return 0;
-}
-
-#endif  // TARGET_OS_IPHONE
-
 DNSServiceErrorType DNSSD_API DNSServiceResolve
 (
     DNSServiceRef                 *sdRef,
@@ -1381,7 +1386,7 @@ DNSServiceErrorType DNSSD_API DNSServiceResolve
     void                          *context
 )
 {
-    char *ptr;
+    uint8_t *ptr;
     size_t len;
     ipc_msg_hdr *hdr;
     DNSServiceErrorType err;
@@ -1398,9 +1403,6 @@ DNSServiceErrorType DNSSD_API DNSServiceResolve
     {
         return kDNSServiceErr_BadParam;
     }
-
-    if ((interfaceIndex == kDNSServiceInterfaceIndexAny) && includeP2PWithIndexAny())
-        flags |= kDNSServiceFlagsIncludeP2P;
 
     err = ConnectToServer(sdRef, flags, resolve_request, handle_resolve_response, (void *)callBack, context);
     if (err) return err;    // On error ConnectToServer leaves *sdRef set to NULL
@@ -1422,28 +1424,24 @@ DNSServiceErrorType DNSSD_API DNSServiceResolve
     put_string(domain, &ptr);
 
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
-#if CHECK_BUNDLE_VERSION
     if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
     {
         err = kDNSServiceErr_NoError;
     }
-#endif
     if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
     return err;
 }
 
-static void handle_query_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *const end)
+static void handle_query_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const uint8_t *data, const uint8_t *const end)
 {
-#if CHECK_BUNDLE_VERSION
     if (cbh->cb_err == kDNSServiceErr_PolicyDenied && !_should_return_noauth_error())
     {
         return;
     }
-#endif
     uint32_t ttl;
     char name[kDNSServiceMaxDomainName];
     uint16_t rrtype, rrclass, rdlen;
-    const char *rdata;
+    const uint8_t *rdata;
 
     get_string(&data, end, name, kDNSServiceMaxDomainName);
     rrtype  = get_uint16(&data, end);
@@ -1457,7 +1455,6 @@ static void handle_query_response(DNSServiceOp *const sdr, const CallbackHeader 
     // MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
 }
 
-
 DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
 (
     DNSServiceRef              *sdRef,
@@ -1470,15 +1467,28 @@ DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
     void                       *context
 )
 {
-    char *ptr;
+    return DNSServiceQueryRecordInternal(sdRef, flags, interfaceIndex, name, rrtype, rrclass, NULL, callBack, context);
+}
+
+DNSServiceErrorType DNSServiceQueryRecordInternal
+(
+    DNSServiceRef              *sdRef,
+    DNSServiceFlags             flags,
+    uint32_t                    interfaceIndex,
+    const char                 *name,
+    uint16_t                    rrtype,
+    uint16_t                    rrclass,
+    const DNSServiceQueryAttr  *attr,
+    DNSServiceQueryRecordReply  callBack,
+    void                       *context
+)
+{
+    uint8_t *ptr;
     size_t len;
     ipc_msg_hdr *hdr;
     DNSServiceErrorType err;
     // NULL name handled below.
     if (!sdRef || !callBack) return kDNSServiceErr_BadParam;
-
-    if ((interfaceIndex == kDNSServiceInterfaceIndexAny) && includeP2PWithIndexAny())
-        flags |= kDNSServiceFlagsIncludeP2P;
 
     err = ConnectToServer(sdRef, flags, query_request, handle_query_response, (void *)callBack, context);
     if (err) return err;    // On error ConnectToServer leaves *sdRef set to NULL
@@ -1490,6 +1500,7 @@ DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
     len += sizeof(uint32_t);  // interfaceIndex
     len += strlen(name) + 1;
     len += 2 * sizeof(uint16_t);  // rrtype, rrclass
+    (void)attr;
     hdr = create_hdr(query_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
     if (!hdr)
     {
@@ -1503,27 +1514,23 @@ DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
     put_uint16(rrtype, &ptr);
     put_uint16(rrclass, &ptr);
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
-#if CHECK_BUNDLE_VERSION
     if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
     {
         err = kDNSServiceErr_NoError;
     }
-#endif
     if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
     return err;
 }
 
-static void handle_addrinfo_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *const end)
+static void handle_addrinfo_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const uint8_t *data, const uint8_t *const end)
 {
-#if CHECK_BUNDLE_VERSION
     if (cbh->cb_err == kDNSServiceErr_PolicyDenied && !_should_return_noauth_error())
     {
         return;
     }
-#endif
     char hostname[kDNSServiceMaxDomainName];
     uint16_t rrtype, rrclass, rdlen;
-    const char *rdata;
+    const uint8_t *rdata;
     uint32_t ttl;
 
     get_string(&data, end, hostname, kDNSServiceMaxDomainName);
@@ -1571,7 +1578,7 @@ static void handle_addrinfo_response(DNSServiceOp *const sdr, const CallbackHead
             }
         }
 
-		((DNSServiceGetAddrInfoReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, hostname, sa, ttl, sdr->AppContext);
+        ((DNSServiceGetAddrInfoReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, hostname, sa, ttl, sdr->AppContext);
     }
     else if (cbh->cb_err == kDNSServiceErr_PolicyDenied)
     {
@@ -1590,7 +1597,7 @@ DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo
     void                             *context          /* may be NULL */
 )
 {
-    char *ptr;
+    uint8_t *ptr;
     size_t len;
     ipc_msg_hdr *hdr;
     DNSServiceErrorType err;
@@ -1620,24 +1627,20 @@ DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo
     put_uint32(protocol, &ptr);
     put_string(hostname, &ptr);
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
-#if CHECK_BUNDLE_VERSION
     if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
     {
         err = kDNSServiceErr_NoError;
     }
-#endif
     if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
     return err;
 }
 
-static void handle_browse_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *const end)
+static void handle_browse_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const uint8_t *data, const uint8_t *const end)
 {
-#if CHECK_BUNDLE_VERSION
     if (cbh->cb_err == kDNSServiceErr_PolicyDenied && !_should_return_noauth_error())
     {
         return;
     }
-#endif
     char replyName[256], replyType[kDNSServiceMaxDomainName], replyDomain[kDNSServiceMaxDomainName];
     get_string(&data, end, replyName, 256);
     get_string(&data, end, replyType, kDNSServiceMaxDomainName);
@@ -1658,16 +1661,13 @@ DNSServiceErrorType DNSSD_API DNSServiceBrowse
     void                  *context
 )
 {
-    char *ptr;
+    uint8_t *ptr;
     size_t len;
     ipc_msg_hdr *hdr;
     DNSServiceErrorType err;
 
     // NULL domain handled below
     if (!sdRef || !regtype || !callBack) return kDNSServiceErr_BadParam;
-
-    if ((interfaceIndex == kDNSServiceInterfaceIndexAny) && includeP2PWithIndexAny())
-        flags |= kDNSServiceFlagsIncludeP2P;
 
     err = ConnectToServer(sdRef, flags, browse_request, handle_browse_response, (void *)callBack, context);
     if (err) return err;    // On error ConnectToServer leaves *sdRef set to NULL
@@ -1687,12 +1687,10 @@ DNSServiceErrorType DNSSD_API DNSServiceBrowse
     put_string(domain, &ptr);
 
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
-#if CHECK_BUNDLE_VERSION
     if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
     {
         err = kDNSServiceErr_NoError;
     }
-#endif
     if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
     return err;
 }
@@ -1701,7 +1699,7 @@ DNSServiceErrorType DNSSD_API DNSServiceSetDefaultDomainForUser(DNSServiceFlags 
 {
     DNSServiceErrorType err;
     DNSServiceOp *tmp;
-    char *ptr;
+    uint8_t *ptr;
     size_t len;
     ipc_msg_hdr *hdr;
 
@@ -1721,14 +1719,12 @@ DNSServiceErrorType DNSSD_API DNSServiceSetDefaultDomainForUser(DNSServiceFlags 
     return err;
 }
 
-static void handle_regservice_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *const end)
+static void handle_regservice_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const uint8_t *data, const uint8_t *const end)
 {
-#if CHECK_BUNDLE_VERSION
     if (cbh->cb_err == kDNSServiceErr_PolicyDenied && !_should_return_noauth_error())
     {
         return;
     }
-#endif
     char name[256], regtype[kDNSServiceMaxDomainName], domain[kDNSServiceMaxDomainName];
     get_string(&data, end, name, 256);
     get_string(&data, end, regtype, kDNSServiceMaxDomainName);
@@ -1754,7 +1750,7 @@ DNSServiceErrorType DNSSD_API DNSServiceRegister
     void                                *context
 )
 {
-    char *ptr;
+    uint8_t *ptr;
     size_t len;
     ipc_msg_hdr *hdr;
     DNSServiceErrorType err;
@@ -1768,9 +1764,6 @@ DNSServiceErrorType DNSSD_API DNSServiceRegister
 
     // No callback must have auto-rename
     if (!callBack && (flags & kDNSServiceFlagsNoAutoRename)) return kDNSServiceErr_BadParam;
-
-    if ((interfaceIndex == kDNSServiceInterfaceIndexAny) && includeP2PWithIndexAny())
-        flags |= kDNSServiceFlagsIncludeP2P;
 
     err = ConnectToServer(sdRef, flags, reg_service_request, callBack ? handle_regservice_response : NULL, (void *)callBack, context);
     if (err) return err;    // On error ConnectToServer leaves *sdRef set to NULL
@@ -1797,17 +1790,15 @@ DNSServiceErrorType DNSSD_API DNSServiceRegister
     put_rdata(txtLen, txtRecord, &ptr);
 
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
-#if CHECK_BUNDLE_VERSION
     if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
     {
         err = kDNSServiceErr_NoError;
     }
-#endif
     if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
     return err;
 }
 
-static void handle_enumeration_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *const end)
+static void handle_enumeration_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const uint8_t *data, const uint8_t *const end)
 {
     char domain[kDNSServiceMaxDomainName];
     get_string(&data, end, domain, kDNSServiceMaxDomainName);
@@ -1825,7 +1816,7 @@ DNSServiceErrorType DNSSD_API DNSServiceEnumerateDomains
     void                      *context
 )
 {
-    char *ptr;
+    uint8_t *ptr;
     size_t len;
     ipc_msg_hdr *hdr;
     DNSServiceErrorType err;
@@ -1855,7 +1846,7 @@ DNSServiceErrorType DNSSD_API DNSServiceEnumerateDomains
     return err;
 }
 
-static void ConnectionResponse(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *const data, const char *const end)
+static void ConnectionResponse(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const uint8_t *const data, const uint8_t *const end)
 {
     (void)data; // Unused
 
@@ -1876,12 +1867,10 @@ static void ConnectionResponse(DNSServiceOp *const sdr, const CallbackHeader *co
     }
     else
     {
-#if CHECK_BUNDLE_VERSION
         if (cbh->cb_err == kDNSServiceErr_PolicyDenied && !_should_return_noauth_error())
         {
             return;
         }
-#endif
         DNSRecordRef rec;
         for (rec = sdr->rec; rec; rec = rec->recnext)
         {
@@ -1917,7 +1906,7 @@ static void ConnectionResponse(DNSServiceOp *const sdr, const CallbackHeader *co
 DNSServiceErrorType DNSSD_API DNSServiceCreateConnection(DNSServiceRef *sdRef)
 {
     DNSServiceErrorType err;
-    char *ptr;
+    uint8_t *ptr;
     size_t len = 0;
     ipc_msg_hdr *hdr;
 
@@ -1959,7 +1948,7 @@ DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
 )
 {
     DNSServiceErrorType err;
-    char *ptr;
+    uint8_t *ptr;
     size_t len;
     ipc_msg_hdr *hdr = NULL;
     DNSRecordRef rref = NULL;
@@ -1969,9 +1958,6 @@ DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
     int f2 = (flags & kDNSServiceFlagsUnique) != 0;
     int f3 = (flags & kDNSServiceFlagsKnownUnique) != 0;
     if (f1 + f2 + f3 != 1) return kDNSServiceErr_BadParam;
-
-    if ((interfaceIndex == kDNSServiceInterfaceIndexAny) && includeP2PWithIndexAny())
-        flags |= kDNSServiceFlagsIncludeP2P;
 
     if (!sdRef || !RecordRef || !fullname || (!rdata && rdlen) || !callBack)
     {
@@ -2038,12 +2024,10 @@ DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
     *p = rref;
 
     err = deliver_request(hdr, sdRef);     // Will free hdr for us
-#if CHECK_BUNDLE_VERSION
     if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
     {
         err = kDNSServiceErr_NoError;
     }
-#endif
     return err;
 }
 
@@ -2061,7 +2045,7 @@ DNSServiceErrorType DNSSD_API DNSServiceAddRecord
 {
     ipc_msg_hdr *hdr;
     size_t len = 0;
-    char *ptr;
+    uint8_t *ptr;
     DNSRecordRef rref;
     DNSRecord **p;
 
@@ -2127,7 +2111,7 @@ DNSServiceErrorType DNSSD_API DNSServiceUpdateRecord
 {
     ipc_msg_hdr *hdr;
     size_t len = 0;
-    char *ptr;
+    uint8_t *ptr;
 
     if (!sdRef || (!rdata && rdlen))
     {
@@ -2167,7 +2151,7 @@ DNSServiceErrorType DNSSD_API DNSServiceRemoveRecord
 {
     ipc_msg_hdr *hdr;
     size_t len = 0;
-    char *ptr;
+    uint8_t *ptr;
     DNSServiceErrorType err;
 
     if (!sdRef)            { syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRemoveRecord called with NULL DNSServiceRef"); return kDNSServiceErr_BadParam; }
@@ -2183,6 +2167,20 @@ DNSServiceErrorType DNSSD_API DNSServiceRemoveRecord
     len += sizeof(flags);
     hdr = create_hdr(remove_record_request, &len, &ptr, 1, sdRef);
     if (!hdr) return kDNSServiceErr_NoMemory;
+	// DNSServiceRemoveRecord can remove records added with DNSServiceRegisterRecord or DNSServiceAddRecord. In the
+	// former case, these records are added on a connection that was created using DNSServiceCreateConnection(), and so
+	// they don't have a subordinate request. In the latter case, they are added on a connection that was created with
+	// DNSServiceRegister(); if these are created with the kDNSServiceFlagsSharedConnection flag set, then they will have
+	// a subordinate connection.
+	// In the case where there is no subordinate connection, we need to send a UID of zero, to avoid matching any subordinate
+	// connection that might have the same UID as the primary connection (this will be the case if there is an outstanding
+	// subordinate request that hasn't been canceled). Failure to send a zero UID can result in the DNSServiceRemoveRecord
+	// having no effect.
+	if (sdRef->primary == NULL)
+	{
+		hdr->client_context.u32[0] = 0;
+		hdr->client_context.u32[1] = 0;
+	}
     hdr->reg_index = RecordRef->record_index;
     put_flags(flags, &ptr);
     err = deliver_request(hdr, sdRef);      // Will free hdr for us
@@ -2210,7 +2208,7 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
 )
 {
     DNSServiceErrorType err;
-    char *ptr;
+    uint8_t *ptr;
     size_t len;
     ipc_msg_hdr *hdr;
     DNSServiceOp *tmp = NULL;
@@ -2242,7 +2240,7 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
 }
 
 
-static void handle_port_mapping_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *const end)
+static void handle_port_mapping_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const uint8_t *data, const uint8_t *const end)
 {
     union { uint32_t l; u_char b[4]; } addr;
     uint8_t protocol;
@@ -2285,7 +2283,7 @@ DNSServiceErrorType DNSSD_API DNSServiceNATPortMappingCreate
     void                                *context      /* may be NULL */
 )
 {
-    char *ptr;
+    uint8_t *ptr;
     size_t len;
     ipc_msg_hdr *hdr;
     union { uint16_t s; u_char b[2]; } internalPort = { internalPortInNetworkByteOrder };

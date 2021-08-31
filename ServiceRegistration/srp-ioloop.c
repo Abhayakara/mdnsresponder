@@ -1,12 +1,12 @@
 /* srp-ioloop.c
  *
- * Copyright (c) 2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -39,12 +39,15 @@ static bool random_leases = false;
 static bool delete_registrations = false;
 static bool use_thread_services = false;
 static bool change_txt_record = false;
+static bool dup_instance_name = false;
 static int num_clients = 1;
 static int bogusify_signatures = false;
 
 const uint64_t thread_enterprise_number = 52627;
 
 cti_connection_t thread_service_context;
+
+static const char *interface_name = NULL;
 
 #define SRP_IO_CONTEXT_MAGIC 0xFEEDFACEFADEBEEFULL  // BEES!   Everybody gets BEES!
 typedef struct io_context {
@@ -174,7 +177,7 @@ srp_connect_udp(void *context, const uint8_t *port, uint16_t address_type, const
             memcpy(&remote.sin6.sin6_port, port, 2);
         }
 
-        io_context->connection = ioloop_connection_create(&remote, false, false, datagram_callback,
+        io_context->connection = ioloop_connection_create(&remote, false, false, false, true, datagram_callback,
                                                           NULL, NULL, NULL, io_context);
         if (io_context->connection == NULL) {
             return kDNSServiceErr_NoMemory;
@@ -310,7 +313,7 @@ interface_callback(void *context, const char *NONNULL name,
             DEBUG("interface_callback: ignoring " PUB_S_SRP " " PRI_SEGMENTED_IPv6_ADDR_SRP, name,
                   SEGMENTED_IPv6_ADDR_PARAM_SRP(rdata, ipv6_rdata_buf));
         } else {
-            INFO("interface_callback: ignoring with non-v4/v6 address" PUB_S_SRP, name);
+            INFO("ignoring with non-v4/v6 address" PUB_S_SRP, name);
         }
         return;
     }
@@ -406,7 +409,7 @@ usage(void)
     fprintf(stderr,
             "srp-client [--lease-time <seconds>] [--client-count <client count>] [--server <address>%%<port>]\n"
             "           [--random-leases] [--delete-registrations] [--use-thread-services] [--log-stderr]\n"
-            "           [--bogusify-signatures]\n");
+            "           [--interface <interface name>] [--bogusify-signatures] [--dup-instance-name]\n");
     exit(1);
 }
 
@@ -417,12 +420,12 @@ cti_service_list_callback(void *UNUSED context, cti_service_vec_t *services, cti
     size_t i;
 
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
-        INFO("cti_get_service_list_callback: disconnected");
+        INFO("disconnected");
         exit(1);
     }
 
     srp_start_address_refresh();
-    ioloop_map_interface_addresses(services, interface_callback);
+    ioloop_map_interface_addresses(interface_name, services, interface_callback);
     for (i = 0; i < services->num; i++) {
         cti_service_t *cti_service = services->services[i];
         // Look for SRP service advertisements only.
@@ -451,6 +454,9 @@ main(int argc, char **argv)
     (void)argv;
     int i;
     bool have_server_address = false;
+    bool log_stderr = false;
+    char instance_name[128];
+    const char *service_type = "_ipps._tcp";
 
     ioloop_init();
 
@@ -469,6 +475,12 @@ main(int argc, char **argv)
         } else if (!strcmp(argv[i], "--client-count")) {
             nump = &num_clients;
             goto number;
+        } else if (!strcmp(argv[i], "--interface")) {
+            if (i + 1 == argc) {
+                usage();
+            }
+            interface_name = argv[i + 1];
+            i++;
         } else if (!strcmp(argv[i], "--server")) {
             char *percent;
             int server_port;
@@ -478,7 +490,7 @@ main(int argc, char **argv)
 
             if (i + 1 == argc) {
                 usage();
-           }
+            }
             percent = strchr(argv[i + 1], '%');
             if (percent == NULL || percent[1] == 0) {
                 usage();
@@ -510,19 +522,32 @@ main(int argc, char **argv)
             delete_registrations = true;
         } else if (!strcmp(argv[i], "--use-thread-services")) {
             use_thread_services = true;
+        } else if (!strcmp(argv[i], "--dup-instance-name")) {
+            dup_instance_name = true;
         } else if (!strcmp(argv[i], "--log-stderr")) {
-            OPENLOG(true);
+            log_stderr = true;
+            OPENLOG("srp-client", true);
         } else if (!strcmp(argv[i], "--change-txt-record")) {
             change_txt_record = true;
         } else if (!strcmp(argv[i], "--bogusify-signatures")) {
             bogusify_signatures = true;
+        } else if (!strcmp(argv[i], "--service-type")) {
+            if (i + 1 == argc) {
+                usage();
+            }
+            service_type = argv[i + 1];
+            i++;
         } else {
             usage();
         }
     }
 
+    if (!log_stderr) {
+        OPENLOG("srp-client", false);
+    }
+
     if (!use_thread_services) {
-        ioloop_map_interface_addresses(NULL, interface_callback);
+        ioloop_map_interface_addresses(interface_name, NULL, interface_callback);
     }
 
     if (!have_server_address && !use_thread_services) {
@@ -530,6 +555,11 @@ main(int argc, char **argv)
         port[1] = 53;
         srp_add_server_address(port, dns_rrtype_aaaa, bogus_address, 16);
         srp_add_server_address(port, dns_rrtype_aaaa, server_address, 16);
+    }
+
+    if (dup_instance_name) {
+        num_clients = 2;
+        strcpy(instance_name, "dup-name-test");
     }
 
     for (i = 0; i < num_clients; i++) {
@@ -576,8 +606,9 @@ main(int argc, char **argv)
             txt_data = TXTRecordGetBytesPtr(&txt);
             txt_len = TXTRecordGetLength(&txt);
         }
-        memcpy(&iport, port, 2);
-        err = DNSServiceRegister(&sdref, 0, 0, hnbuf, "_ipps._tcp",
+        iport = (port[0] << 8) + port[1];
+
+        err = DNSServiceRegister(&sdref, 0, 0, dup_instance_name ? instance_name : hnbuf, service_type,
                                  0, 0, iport, txt_len, txt_data, register_callback, client);
         if (err != kDNSServiceErr_NoError) {
             ERROR("DNSServiceRegister failed: %d", err);

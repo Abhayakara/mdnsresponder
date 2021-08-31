@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2007-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,17 +14,13 @@
  * limitations under the License.
  */
 
-#include <mach/mach.h>
-#include <mach/mach_error.h>
-#include <mach/vm_map.h>
-#include <servers/bootstrap.h>
-#include <IOKit/IOReturn.h>
-#include <CoreFoundation/CoreFoundation.h>
 #include "helper.h"
+#include "mDNSMacOSX.h"
 #include <dispatch/dispatch.h>
 #include <arpa/inet.h>
 #include <xpc/private.h>
 #include <Block.h>
+#include <mdns/system.h>
 #include "mdns_strict.h"
 
 //
@@ -136,7 +132,7 @@ mDNSlocal int SendDict_ToServer(xpc_object_t msg, xpc_object_t *out_reply)
         MDNS_DISPOSE_DISPATCH(tmp);
     });
     
-    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (maxwait_secs * NSEC_PER_SEC))) != 0)
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (maxwait_secs * (int64_t)NSEC_PER_SEC))) != 0)
     {
         LogMsg("SendDict_ToServer: UNEXPECTED WAIT_TIME in dispatch_semaphore_wait");
 
@@ -192,46 +188,66 @@ void mDNSPreferencesSetName(int key, domainlabel *old, domainlabel *new)
     
     if (new)
         ConvertDomainLabelToCString_unescaped(new, names.newname);
-    
-    
+
+    if ((names.newname[0] != '\0') && (strcmp(names.oldname, names.newname) != 0))
+    {
+        if (key == kmDNSComputerName)
+        {
+            // Original comment regarding why the current encoding is used:
+            // We want to write the new Computer Name to System Preferences, without disturbing the user-selected
+            // system-wide default character set used for things like AppleTalk NBP and NETBIOS service advertising.
+            // Note that this encoding is not used for the computer name, but since both are set by the same call,
+            // we need to take care to set the name without changing the character set.
+            const mdns_computer_name_opts_t options = mdns_computer_name_opt_keep_current_encoding;
+            const OSStatus err = mdns_system_set_computer_name_with_utf8_cstring(names.newname, kMDNSResponderID, options);
+            if (err)
+            {
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
+                    "Failed to set computer name -- name: " PRI_S ", error: %ld", names.newname, (long)err);
+            }
+        }
+        else if (key == kmDNSLocalHostName)
+        {
+            const OSStatus err = mdns_system_set_local_host_name_with_utf8_cstring(names.newname, kMDNSResponderID, false);
+            if (err)
+            {
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
+                    "Failed to set local hostname -- name: " PRI_S ", error: %ld", names.newname, (long)err);
+            }
+        }
+    }
+
+#if MDNSRESPONDER_HELPER_NOTIFIES_USER_OF_NAME_CHANGES
     mDNSHELPER_DEBUG("mDNSPreferencesSetName: XPC IPC Test oldname %s newname %s", names.oldname, names.newname);
      
     // Create Dictionary To Send
     xpc_object_t dict = xpc_dictionary_create(NULL, NULL, 0);
     xpc_dictionary_set_uint64(dict, kHelperMode, set_name);
     
-    xpc_dictionary_set_uint64(dict, kPrefsNameKey, key);
+    xpc_dictionary_set_uint64(dict, kPrefsNameKey, (uint64_t)key);
     xpc_dictionary_set_string(dict, kPrefsOldName, names.oldname);
     xpc_dictionary_set_string(dict, kPrefsNewName, names.newname);
     
     SendDict_ToServer(dict, NULL);
     MDNS_DISPOSE_XPC(dict);
-
+#endif
 }
 
-void mDNSRequestBPF()
+void mDNSRequestBPF(const dispatch_queue_t queue, const mhc_bpf_open_result_handler_t handler)
 {
-     mDNSHELPER_DEBUG("mDNSRequestBPF: Using XPC IPC");
-     
-     // Create Dictionary To Send
-     xpc_object_t dict = xpc_dictionary_create(NULL, NULL, 0);
-     xpc_dictionary_set_uint64(dict, kHelperMode, bpf_request);
-     SendDict_ToServer(dict, NULL);
-     MDNS_DISPOSE_XPC(dict);
-
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG, "Requesting BPF from helper");
+    mhc_bpf_open(O_RDWR, queue, handler);
 }
 
-int mDNSPowerRequest(int key, int interval)
+int mDNSPowerSleepSystem(void)
 {
     int err_code = kHelperErr_NotConnected;
-    
-    mDNSHELPER_DEBUG("mDNSPowerRequest: Using XPC IPC calling out to Helper key is [%d] interval is [%d]", key, interval);
     
     // Create Dictionary To Send
     xpc_object_t dict = xpc_dictionary_create(NULL, NULL, 0);
     xpc_dictionary_set_uint64(dict, kHelperMode, power_req);
-    xpc_dictionary_set_uint64(dict, "powerreq_key", key);
-    xpc_dictionary_set_uint64(dict, "powerreq_interval", interval);
+    xpc_dictionary_set_uint64(dict, "powerreq_key", 0);
+    xpc_dictionary_set_uint64(dict, "powerreq_interval", 0);
     
     err_code = SendDict_ToServer(dict, NULL);
     MDNS_DISPOSE_XPC(dict);
@@ -240,7 +256,7 @@ int mDNSPowerRequest(int key, int interval)
     return err_code;
 }
 
-int mDNSSetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const ethaddr_t eth)
+int mDNSSetLocalAddressCacheEntry(mDNSu32 ifindex, int family, const v6addr_t ip, const ethaddr_t eth)
 {
     int err_code = kHelperErr_NotConnected;
     
@@ -251,7 +267,7 @@ int mDNSSetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, co
     xpc_dictionary_set_uint64(dict, kHelperMode, set_localaddr_cacheentry);
     
     xpc_dictionary_set_uint64(dict, "slace_ifindex", ifindex);
-    xpc_dictionary_set_uint64(dict, "slace_family", family);
+    xpc_dictionary_set_uint64(dict, "slace_family", (uint64_t)family);
     
     xpc_dictionary_set_data(dict, "slace_ip", (const uint8_t*)ip, sizeof(v6addr_t));
     xpc_dictionary_set_data(dict, "slace_eth", (const uint8_t*)eth, sizeof(ethaddr_t));
@@ -266,18 +282,7 @@ int mDNSSetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, co
 
 void mDNSNotify(const char *title, const char *msg) // Both strings are UTF-8 text
 {
-    mDNSHELPER_DEBUG("mDNSNotify() calling out to Helper XPC IPC title[%s] msg[%s]", title, msg);
-    
-    // Create Dictionary To Send
-    xpc_object_t dict = xpc_dictionary_create(NULL, NULL, 0);
-    xpc_dictionary_set_uint64(dict, kHelperMode, user_notify);
-    
-    xpc_dictionary_set_string(dict, "notify_title", title);
-    xpc_dictionary_set_string(dict, "notify_msg", msg);
-    
-    SendDict_ToServer(dict, NULL);
-    MDNS_DISPOSE_XPC(dict);
-
+    mhc_display_notification(title, msg);
 }
 
 
@@ -310,7 +315,7 @@ int mDNSKeychainGetSecrets(CFArrayRef *result)
     mDNSHELPER_DEBUG("mDNSKeychainGetSecrets: Using XPC IPC calling out to Helper: numsecrets is %u, secretsCnt is %u error_code is %d",
                      (unsigned int)numsecrets, (unsigned int)secretsCnt, error_code);
      
-    if (NULL == (bytes = CFDataCreateWithBytesNoCopy(kCFAllocatorDefault, (const void*)sec, secretsCnt, kCFAllocatorNull)))
+    if (NULL == (bytes = CFDataCreateWithBytesNoCopy(kCFAllocatorDefault, (const void*)sec, (CFIndex)secretsCnt, kCFAllocatorNull)))
     {
         error_code = kHelperErr_ApiErr;
         LogMsg("mDNSKeychainGetSecrets: CFDataCreateWithBytesNoCopy failed");
@@ -358,7 +363,7 @@ void mDNSSendWakeupPacket(unsigned int ifid, char *eth_addr, char *ip_addr, int 
     xpc_dictionary_set_uint64(dict, "interface_index", ifid);
     xpc_dictionary_set_string(dict, "ethernet_address", eth_addr);
     xpc_dictionary_set_string(dict, "ip_address", ip_addr);
-    xpc_dictionary_set_uint64(dict, "swp_iteration", iteration);
+    xpc_dictionary_set_uint64(dict, "swp_iteration", (uint64_t)iteration);
     
     SendDict_ToServer(dict, NULL);
     MDNS_DISPOSE_XPC(dict);

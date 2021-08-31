@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  * 
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  * 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -63,7 +63,15 @@
 
 #define	DEBUG_NAME									"[mDNSWin32] "
 
+#ifdef WIN32_CENTENNIAL
+#ifdef DEBUG
+#define	MDNS_WINDOWS_USE_IPV6_IF_ADDRS				0
+#else
 #define	MDNS_WINDOWS_USE_IPV6_IF_ADDRS				1
+#endif
+#else
+#define	MDNS_WINDOWS_USE_IPV6_IF_ADDRS				1
+#endif
 #define	MDNS_WINDOWS_ENABLE_IPV4					1
 #define	MDNS_WINDOWS_ENABLE_IPV6					1
 #define	MDNS_FIX_IPHLPAPI_PREFIX_BUG				1
@@ -241,20 +249,20 @@ static HCRYPTPROV			 g_hProvider 				= ( ULONG_PTR ) NULL;
 
 
 typedef DNSServiceErrorType ( DNSSD_API *DNSServiceRegisterFunc )
-    (
-    DNSServiceRef                       *sdRef,
-    DNSServiceFlags                     flags,
-    uint32_t                            interfaceIndex,
-    const char                          *name,         /* may be NULL */
-    const char                          *regtype,
-    const char                          *domain,       /* may be NULL */
-    const char                          *host,         /* may be NULL */
-    uint16_t                            port,
-    uint16_t                            txtLen,
-    const void                          *txtRecord,    /* may be NULL */
-    DNSServiceRegisterReply             callBack,      /* may be NULL */
-    void                                *context       /* may be NULL */
-    );
+	(
+	DNSServiceRef                       *sdRef,
+	DNSServiceFlags                     flags,
+	uint32_t                            interfaceIndex,
+	const char                          *name,         /* may be NULL */
+	const char                          *regtype,
+	const char                          *domain,       /* may be NULL */
+	const char                          *host,         /* may be NULL */
+	uint16_t                            port,
+	uint16_t                            txtLen,
+	const void                          *txtRecord,    /* may be NULL */
+	DNSServiceRegisterReply             callBack,      /* may be NULL */
+	void                                *context       /* may be NULL */
+	);
 
 
 typedef void ( DNSSD_API *DNSServiceRefDeallocateFunc )( DNSServiceRef sdRef );
@@ -284,8 +292,10 @@ mDNSlocal HANDLE					gSMBThreadQuitEvent			= NULL;
 mDNSexport mStatus	mDNSPlatformInit( mDNS * const inMDNS )
 {
 	mStatus		err;
+#ifndef WIN32_CENTENNIAL
 	OSVERSIONINFO osInfo;
 	BOOL ok;
+#endif
 	WSADATA		wsaData;
 	int			supported;
 	struct sockaddr_in	sa4;
@@ -308,6 +318,7 @@ mDNSexport mStatus	mDNSPlatformInit( mDNS * const inMDNS )
 	inMDNS->p->checkFileSharesTimeout		= 10;		// Retry time for CheckFileShares() in seconds
 	mDNSPlatformOneSecond 					= 1000;		// Use milliseconds as the quantum of time
 	
+#ifndef WIN32_CENTENNIAL
 	// Get OS version info
 	
 	osInfo.dwOSVersionInfoSize = sizeof( OSVERSIONINFO );
@@ -323,6 +334,10 @@ mDNSexport mStatus	mDNSPlatformInit( mDNS * const inMDNS )
 	{
 		gEnableIPv6 = FALSE;
 	}
+#else
+	inMDNS->p->osMajorVersion = 6;
+	inMDNS->p->osMinorVersion = 3;
+#endif
 
 	// Startup WinSock 2.2 or later.
 	
@@ -673,25 +688,25 @@ mDNSexport void mDNSPlatformQsort(void *base, int nel, int width, int (*compar)(
 // Proxy stub functions
 mDNSexport mDNSu8 *DNSProxySetAttributes(DNSQuestion *q, DNSMessageHeader *h, DNSMessage *msg, mDNSu8 *ptr, mDNSu8 *limit)
 {
-    (void) q;
-    (void) h;
-    (void) msg;
-    (void) ptr;
-    (void) limit;
+	(void) q;
+	(void) h;
+	(void) msg;
+	(void) ptr;
+	(void) limit;
 
-    return ptr;
+	return ptr;
 }
 
 mDNSexport void DNSProxyInit(mDNS *const m, mDNSu32 IpIfArr[], mDNSu32 OpIf)
 {
-    (void) m;
-    (void) IpIfArr;
-    (void) OpIf;
+	(void) m;
+	(void) IpIfArr;
+	(void) OpIf;
 }
 
 mDNSexport void DNSProxyTerminate(mDNS *const m)
 {
-    (void) m;
+	(void) m;
 }
 
 //===========================================================================================================================
@@ -796,6 +811,33 @@ mDNSexport mDNSs32	mDNSPlatformRawTime( void )
 mDNSexport mDNSs32	mDNSPlatformUTC( void )
 {
 	return ( mDNSs32 ) time( NULL );
+}
+
+//===========================================================================================================================
+//	getlocaltimestampfromplatformtime
+//===========================================================================================================================
+
+mDNSexport void getLocalTimestampFromPlatformTime(const mDNSs32 platformTimeNow, const mDNSs32 platformTime,
+	char *const outBuffer, const mDNSu32 bufferLen)
+{
+	(void)platformTimeNow;
+	(void)platformTime;
+	if (bufferLen > 0)
+	{
+		outBuffer[0] = '\0';
+	}
+}
+
+//===========================================================================================================================
+//	getLocalTimestampNow
+//===========================================================================================================================
+
+mDNSexport void getLocalTimestampNow(char *const outBuffer, const mDNSu32 bufferLen)
+{
+	if (bufferLen > 0)
+	{
+		outBuffer[0] = '\0';
+	}
 }
 
 //===========================================================================================================================
@@ -1054,7 +1096,7 @@ mDNSPlatformTCPConnect
 
 	// Setup connection data object
 
-	sock->userCallback	= inCallback;
+	sock->tcpConnectionCallback = inCallback;
 	sock->userContext	= inContext;
 
 	mDNSPlatformMemZero(&saddr, sizeof(saddr));
@@ -1141,11 +1183,11 @@ mDNSexport void	mDNSPlatformTCPCloseConnection( TCPSocket *sock )
 mDNSexport long	mDNSPlatformReadTCP( TCPSocket *sock, void *inBuffer, unsigned long inBufferSize, mDNSBool * closed )
 {
 	int			nread;
-    OSStatus    err;
+	OSStatus    err;
 
 	*closed = mDNSfalse;
-    nread = recv( sock->fd, inBuffer, inBufferSize, 0 );
-    err = translate_errno( ( nread >= 0 ), WSAGetLastError(), mStatus_UnknownErr );
+	nread = recv( sock->fd, inBuffer, inBufferSize, 0 );
+	err = translate_errno( ( nread >= 0 ), WSAGetLastError(), mStatus_UnknownErr );
 	
 	if ( nread > 0 )
 	{
@@ -1170,7 +1212,7 @@ mDNSexport long	mDNSPlatformReadTCP( TCPSocket *sock, void *inBuffer, unsigned l
 		nread = -1;
 	}
 
-    return nread;
+	return nread;
 }
 
 //===========================================================================================================================
@@ -1220,7 +1262,7 @@ TCPSocketNotification( SOCKET sock, LPWSANETWORKEVENTS event, void *context )
 	DEBUG_UNUSED( sock );
 
 	require_action( tcpSock, exit, err = mStatus_BadParamErr );
-	callback = ( TCPConnectionCallback ) tcpSock->userCallback;
+	callback = tcpSock->tcpConnectionCallback;
 	require_action( callback, exit, err = mStatus_BadParamErr );
 
 	if ( event && ( event->lNetworkEvents & FD_CONNECT ) )
@@ -1282,15 +1324,15 @@ mDNSexport UDPSocket* mDNSPlatformUDPSocket( const mDNSIPPort requestedport )
 		// The kernel doesn't do cryptographically strong random port
 		// allocation, so we do it ourselves here
 
-        if (mDNSIPPortIsZero(requestedport))
+		if (mDNSIPPortIsZero(requestedport))
 		{
 			port = mDNSOpaque16fromIntVal( ( mDNSu16 ) ( 0xC000 + mDNSRandom(0x3FFF) ) );
 		}
 
 		saddr.sin_port = port.NotAnInteger;
 
-        err = SetupSocket( (struct sockaddr*) &saddr, port, &sock->fd );
-        if (!err) break;
+		err = SetupSocket( (struct sockaddr*) &saddr, port, &sock->fd );
+		if (!err) break;
 	}
 
 	require_noerr( err, exit );
@@ -1644,7 +1686,7 @@ mDNSexport mDNSBool mDNSPlatformSetDNSConfig( mDNSBool setservers, mDNSBool sets
 	{
 		GetDDNSDomains( regDomains, kServiceParametersNode TEXT("\\DynDNS\\Setup\\") kServiceDynDNSRegistrationDomains );
 	}
-    return mDNStrue;
+	return mDNStrue;
 }
 
 //===========================================================================================================================
@@ -1674,7 +1716,7 @@ mDNSPlatformDynDNSHostNameStatusChanged(const domainname *const dname, const mSt
 
 	check( strlen( p ) <= MAX_ESCAPED_DOMAIN_NAME );
 	name = kServiceParametersNode TEXT("\\DynDNS\\State\\HostNames");
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, name, &key );
+	err = RegCreateKey(HKEY_CURRENT_USER, name, &key);
 	require_noerr( err, exit );
 
 	bStatus = ( status ) ? 0 : 1;
@@ -1750,7 +1792,7 @@ SetSearchDomainList( void )
 	HKEY				key;
 	mStatus				err;
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, TEXT("SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters"), &key );
+	err = RegCreateKey(HKEY_CURRENT_USER, TEXT("SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters"), &key);
 	require_noerr( err, exit );
 
 	err = RegQueryString( key, "SearchList", &searchList, &searchListLen, NULL );
@@ -1804,9 +1846,9 @@ SetReverseMapSearchDomainList( void )
 			if (!SetupAddr(&netmask, ifa->ifa_netmask))
 			{
 				_snprintf(buffer, sizeof( buffer ), "%d.%d.%d.%d.in-addr.arpa.", addr.ip.v4.b[3] & netmask.ip.v4.b[3],
-                                                                               addr.ip.v4.b[2] & netmask.ip.v4.b[2],
-                                                                               addr.ip.v4.b[1] & netmask.ip.v4.b[1],
-                                                                               addr.ip.v4.b[0] & netmask.ip.v4.b[0]);
+																			   addr.ip.v4.b[2] & netmask.ip.v4.b[2],
+																			   addr.ip.v4.b[1] & netmask.ip.v4.b[1],
+																			   addr.ip.v4.b[0] & netmask.ip.v4.b[0]);
 				mDNS_AddSearchDomain_CString(buffer, mDNSNULL);
 			}
 		}
@@ -1947,11 +1989,9 @@ SetDomainFromDHCP( void )
 
 	for ( pAdapter = pAdapterInfo; pAdapter; pAdapter = pAdapter->Next )
 	{
-		if ( pAdapter->IpAddressList.IpAddress.String &&
-		     pAdapter->IpAddressList.IpAddress.String[0] &&
-		     pAdapter->GatewayList.IpAddress.String &&
-		     pAdapter->GatewayList.IpAddress.String[0] &&
-		     ( !index || ( pAdapter->Index == index ) ) )
+		if ( pAdapter->IpAddressList.IpAddress.String[0] &&
+			 pAdapter->GatewayList.IpAddress.String[0] &&
+			 ( !index || ( pAdapter->Index == index ) ) )
 		{
 			// Found one that will work
 
@@ -2041,13 +2081,11 @@ mDNSPlatformGetPrimaryInterface( mDNSAddr * v4, mDNSAddr * v6, mDNSAddr * router
 
 	for ( pAdapter = pAdapterInfo; pAdapter; pAdapter = pAdapter->Next )
 	{
-		if ( pAdapter->IpAddressList.IpAddress.String &&
-		     pAdapter->IpAddressList.IpAddress.String[0] &&
-		     pAdapter->GatewayList.IpAddress.String &&
-		     pAdapter->GatewayList.IpAddress.String[0] &&
-		     ( StringToAddress( v4, pAdapter->IpAddressList.IpAddress.String ) == mStatus_NoError ) &&
-		     ( StringToAddress( router, pAdapter->GatewayList.IpAddress.String ) == mStatus_NoError ) &&
-		     ( !index || ( pAdapter->Index == index ) ) )
+		if ( pAdapter->IpAddressList.IpAddress.String[0] &&
+			 pAdapter->GatewayList.IpAddress.String[0] &&
+			 ( StringToAddress( v4, pAdapter->IpAddressList.IpAddress.String ) == mStatus_NoError ) &&
+			 ( StringToAddress( router, pAdapter->GatewayList.IpAddress.String ) == mStatus_NoError ) &&
+			 ( !index || ( pAdapter->Index == index ) ) )
 		{
 			// Found one that will work
 
@@ -2105,8 +2143,8 @@ mDNSexport  mStatus    mDNSPlatformClearSPSData(void)
 mDNSexport mStatus mDNSPlatformStoreOwnerOptRecord(char *ifname, DNSMessage *msg, int length)
 {
 	(void) ifname;	// Unused
-    (void) msg;     // Unused
-    (void) length;  // Unused
+	(void) msg;     // Unused
+	(void) length;  // Unused
 	return mStatus_UnsupportedErr;
 }
 
@@ -2122,17 +2160,17 @@ mDNSexport mStatus mDNSPlatformRetrieveTCPInfo( mDNSAddr *laddr, mDNSIPPort *lpo
 }
 
 mDNSexport void mDNSPlatformSetSocktOpt(void *sock, mDNSTransport_Type transType, mDNSAddr_Type addrType, const DNSQuestion *q)
-    {
-    (void) sock;
-    (void) transType;
-    (void) addrType;
-    (void) q;
-    }
+	{
+	(void) sock;
+	(void) transType;
+	(void) addrType;
+	(void) q;
+	}
 
 mDNSexport mDNSs32 mDNSPlatformGetPID()
-    {
-    return 0;
-    }
+	{
+	return 0;
+	}
 
 mDNSexport mDNSu16 mDNSPlatformGetUDPPort(UDPSocket *sock)
 {
@@ -2144,7 +2182,7 @@ mDNSexport mDNSu16 mDNSPlatformGetUDPPort(UDPSocket *sock)
 mDNSexport mDNSBool mDNSPlatformInterfaceIsD2D(mDNSInterfaceID InterfaceID)
 {
 	DEBUG_UNUSED( InterfaceID );
-    
+	
 	return mDNSfalse;
 }
 
@@ -2159,8 +2197,8 @@ mDNSexport mDNSBool mDNSPlatformInterfaceIsD2D(mDNSInterfaceID InterfaceID)
 mDNSexport void	debugf_( const char *inFormat, ... )
 {
 	char		buffer[ 512 ];
-    va_list		args;
-    mDNSu32		length;
+	va_list		args;
+	mDNSu32		length;
 	
 	va_start( args, inFormat );
 	length = mDNS_vsnprintf( buffer, sizeof( buffer ), inFormat, args );
@@ -2178,8 +2216,8 @@ mDNSexport void	debugf_( const char *inFormat, ... )
 mDNSexport void	verbosedebugf_( const char *inFormat, ... )
 {
 	char		buffer[ 512 ];
-    va_list		args;
-    mDNSu32		length;
+	va_list		args;
+	mDNSu32		length;
 	
 	va_start( args, inFormat );
 	length = mDNS_vsnprintf( buffer, sizeof( buffer ), inFormat, args );
@@ -2405,7 +2443,11 @@ mStatus	SetupInterfaceList( mDNS * const inMDNS )
 	check( inMDNS->p );
 	
 	inMDNS->p->registeredLoopback4	= mDNSfalse;
+#if _WIN64
+	inMDNS->p->nextDHCPLeaseExpires = 0x7FFFFFFFFFFFFFFF;
+#else
 	inMDNS->p->nextDHCPLeaseExpires = 0x7FFFFFFF;
+#endif
 	addrs							= NULL;
 	foundv4							= mDNSfalse;
 	foundv6							= mDNSfalse;
@@ -2458,7 +2500,7 @@ mStatus	SetupInterfaceList( mDNS * const inMDNS )
 		// If this guy is point-to-point (ifd->interfaceInfo.McastTxRx == 0 ) we still want to
 		// register him, but we also want to note that we haven't found a v4 interface
 		// so that we register loopback so same host operations work
- 		
+		
 		if ( ifd->interfaceInfo.McastTxRx == mDNStrue )
 		{
 			foundv4 = mDNStrue;
@@ -2516,7 +2558,7 @@ mStatus	SetupInterfaceList( mDNS * const inMDNS )
 			// If this guy is point-to-point (ifd->interfaceInfo.McastTxRx == 0 ) we still want to
 			// register him, but we also want to note that we haven't found a v4 interface
 			// so that we register loopback so same host operations work
-	 		
+			
 			if ( ifd->interfaceInfo.McastTxRx == mDNStrue )
 			{
 				foundv6 = mDNStrue;
@@ -2746,8 +2788,8 @@ mDNSlocal mStatus	SetupInterface( mDNS * const inMDNS, const struct ifaddrs *inI
 			}
 
 			if ( ( inIFA->ifa_addr->sa_family != AF_INET ) &&
-			     ( p->interfaceInfo.ip.type == mDNSAddrType_IPv4 ) &&
-			     ( p->interfaceInfo.ip.ip.v4.b[ 0 ] != 169 || p->interfaceInfo.ip.ip.v4.b[ 1 ] != 254 ) )
+				 ( p->interfaceInfo.ip.type == mDNSAddrType_IPv4 ) &&
+				 ( p->interfaceInfo.ip.ip.v4.b[ 0 ] != 169 || p->interfaceInfo.ip.ip.v4.b[ 1 ] != 254 ) )
 			{
 				ifd->interfaceInfo.McastTxRx = mDNSfalse;
 			}
@@ -2807,10 +2849,10 @@ mDNSlocal mStatus	SetupInterface( mDNS * const inMDNS, const struct ifaddrs *inI
 		require_noerr( err, exit );
 	}
 
-    // If interface is a direct link, address record will be marked as kDNSRecordTypeKnownUnique
-    // and skip the probe phase of the probe/announce packet sequence.
-    ifd->interfaceInfo.DirectLink = mDNSfalse;
-    ifd->interfaceInfo.SupportsUnicastMDNSResponse = mDNStrue;
+	// If interface is a direct link, address record will be marked as kDNSRecordTypeKnownUnique
+	// and skip the probe phase of the probe/announce packet sequence.
+	ifd->interfaceInfo.DirectLink = mDNSfalse;
+	ifd->interfaceInfo.SupportsUnicastMDNSResponse = mDNStrue;
 
 	err = mDNS_RegisterInterface( inMDNS, &ifd->interfaceInfo, NormalActivation );
 	require_noerr( err, exit );
@@ -3141,7 +3183,7 @@ mDNSlocal void CALLBACK
 UDPSocketNotification( SOCKET sock, LPWSANETWORKEVENTS event, void *context )
 {
 	UDPSocket				*udpSock = ( UDPSocket* ) context;
-	WSAMSG					wmsg;
+	WSAMSG					wmsg = {0};
 	WSABUF					wbuf;
 	struct sockaddr_storage	sockSrcAddr;		// This is filled in by the WSARecv* function
 	INT						sockSrcAddrLen;		// See above
@@ -3736,8 +3778,8 @@ mDNSlocal int	getifaddrs_ipv6( struct ifaddrs **outAddrs )
 						// as the prefix address.
 
 						if ( ( prefix->PrefixLength == 0 ) ||
-						     ( prefix->PrefixLength > 128 ) ||
-						     ( addr->Address.iSockaddrLength != prefix->Address.iSockaddrLength ) ||
+							 ( prefix->PrefixLength > 128 ) ||
+							 ( addr->Address.iSockaddrLength != prefix->Address.iSockaddrLength ) ||
 							 ( memcmp( addr->Address.lpSockaddr, prefix->Address.lpSockaddr, addr->Address.iSockaddrLength ) == 0 ) )
 						{
 							continue;
@@ -4175,7 +4217,7 @@ mDNSlocal mDNSBool IsPointToPoint( IP_ADAPTER_UNICAST_ADDRESS * addr )
 		for ( p = addrs; p; p = p->ifa_next )
 		{
 			if ( ( addr->Address.lpSockaddr->sa_family == p->ifa_addr->sa_family ) &&
-			     ( ( ( struct sockaddr_in* ) addr->Address.lpSockaddr )->sin_addr.s_addr == ( ( struct sockaddr_in* ) p->ifa_addr )->sin_addr.s_addr ) )
+				 ( ( ( struct sockaddr_in* ) addr->Address.lpSockaddr )->sin_addr.s_addr == ( ( struct sockaddr_in* ) p->ifa_addr )->sin_addr.s_addr ) )
 			{
 				ret = ( p->ifa_flags & IFF_POINTTOPOINT ) ? mDNStrue : mDNSfalse;
 				break;
@@ -4203,10 +4245,11 @@ mDNSlocal OSStatus	GetWindowsVersionString( char *inBuffer, size_t inBufferSize 
 	#define VER_PLATFORM_WIN32_CE		3
 #endif
 
-	OSStatus				err;
+	OSStatus				err = 0;
+	const char *			versionString;
+#ifndef WIN32_CENTENNIAL
 	OSVERSIONINFO			osInfo;
 	BOOL					ok;
-	const char *			versionString;
 	DWORD					platformID;
 	DWORD					majorVersion;
 	DWORD					minorVersion;
@@ -4284,6 +4327,9 @@ mDNSlocal OSStatus	GetWindowsVersionString( char *inBuffer, size_t inBufferSize 
 	}
 	
 exit:
+#else
+	versionString = "Windows";
+#endif
 	if( inBuffer && ( inBufferSize > 0 ) )
 	{
 		inBufferSize -= 1;
@@ -4540,7 +4586,7 @@ mDNSlocal void GetDDNSFQDN( domainname *const fqdn )
 
 	// Get info from Bonjour registry key
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode TEXT("\\DynDNS\\Setup\\") kServiceDynDNSHostNames, &key );
+	err = RegCreateKey(HKEY_CURRENT_USER, kServiceParametersNode TEXT("\\DynDNS\\Setup\\") kServiceDynDNSHostNames, &key);
 	require_noerr( err, exit );
 
 	err = RegQueryString( key, "", &name, &dwSize, &enabled );
@@ -4590,7 +4636,7 @@ mDNSlocal void GetDDNSConfig( DNameListElem ** domains, LPCSTR lpSubKey )
 
 	*domains = NULL;
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, lpSubKey, &key );
+	err = RegCreateKey(HKEY_CURRENT_USER, lpSubKey, &key);
 	require_noerr( err, exit );
 
 	// Get information about this node
@@ -4603,7 +4649,7 @@ mDNSlocal void GetDDNSConfig( DNameListElem ** domains, LPCSTR lpSubKey )
 		DWORD enabled;
 
 		dwSize = kRegistryMaxKeyLength;
-        
+		
 		err = RegEnumKeyExA( key, i, subKeyName, &dwSize, NULL, NULL, NULL, NULL );
 
 		if ( !err )
@@ -4816,7 +4862,7 @@ CheckFileShares( mDNS * const m )
 
 	require_action_quiet( m->AdvertiseLocalAddresses && !m->ShutdownTime, exit, err = kNoErr );
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\Services\\SMB", &key );
+	err = RegCreateKey(HKEY_CURRENT_USER, kServiceParametersNode L"\\Services\\SMB", &key);
 
 	if ( !err )
 	{
@@ -4974,8 +5020,8 @@ IsWOMPEnabledForAdapter( const char * adapterName )
 {
 	char						fileName[80];
 	NDIS_OID					oid;
-    DWORD						count;
-    HANDLE						handle	= INVALID_HANDLE_VALUE;
+	DWORD						count;
+	HANDLE						handle	= INVALID_HANDLE_VALUE;
 	NDIS_PNP_CAPABILITIES	*	pNPC	= NULL;
 	int							err;
 	mDNSu8						ok		= TRUE;
@@ -4984,11 +5030,11 @@ IsWOMPEnabledForAdapter( const char * adapterName )
 
 	dlog( kDebugLevelTrace, DEBUG_NAME "IsWOMPEnabledForAdapter: %s\n", adapterName );
 	
-    // Construct a device name to pass to CreateFile
+	// Construct a device name to pass to CreateFile
 
 	strncpy_s( fileName, sizeof( fileName ), DEVICE_PREFIX, strlen( DEVICE_PREFIX ) );
 	strcat_s( fileName, sizeof( fileName ), adapterName );
-    handle = CreateFileA( fileName, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, INVALID_HANDLE_VALUE );
+	handle = CreateFileA( fileName, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, INVALID_HANDLE_VALUE );
 	require_action ( handle != INVALID_HANDLE_VALUE, exit, ok = FALSE );
 
 	// We successfully opened the driver, format the IOCTL to pass the driver.
@@ -5000,7 +5046,7 @@ IsWOMPEnabledForAdapter( const char * adapterName )
 	err = translate_errno( ok, GetLastError(), kUnknownErr );
 	require_action( !err, exit, ok = FALSE );
 	ok = ( mDNSu8 ) ( ( count == sizeof( NDIS_PNP_CAPABILITIES ) ) && ( pNPC->Flags & NDIS_DEVICE_WAKE_ON_MAGIC_PACKET_ENABLE ) );
-       
+	   
 exit:
 
 	if ( pNPC != NULL )
@@ -5008,10 +5054,10 @@ exit:
 		free( pNPC );
 	}
 
-    if ( handle != INVALID_HANDLE_VALUE )
-    {
+	if ( handle != INVALID_HANDLE_VALUE )
+	{
 		CloseHandle( handle );
-    }
+	}
 
 	dlog( kDebugLevelTrace, DEBUG_NAME "IsWOMPEnabledForAdapter returns %s\n", ok ? "true" : "false" );
 

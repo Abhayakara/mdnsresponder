@@ -1,12 +1,12 @@
 /* ioloop.c
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -50,9 +50,16 @@
 #include "srp-tls.h"
 #endif
 
+typedef struct async_event {
+    struct async_event *next;
+    async_callback_t callback;
+    void *context;
+} async_event_t;
+
 io_t *ios;
 wakeup_t *wakeups;
 subproc_t *subprocesses;
+async_event_t *async_events;
 int64_t ioloop_now;
 
 #ifdef USE_KQUEUE
@@ -88,18 +95,6 @@ ioloop_timenow()
     gettimeofday(&tv, 0);
     now = (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
     return now;
-}
-
-#define message_create(x) message_create_(x, __FILE__, __LINE__)
-static message_t *
-message_create_(size_t message_size, const char *file, int line)
-{
-    message_t *message = (message_t *)malloc(message_size + (sizeof (message_t)) - (sizeof (dns_wire_t)));
-    if (message) {
-        memset(message, 0, (sizeof (message_t)) - (sizeof (dns_wire_t)));
-        RETAIN(message);
-    }
-    return message;
 }
 
 static void
@@ -257,11 +252,11 @@ ioloop_wakeup_release_(wakeup_t *wakeup, const char *file, int line)
 }
 
 wakeup_t *
-ioloop_wakeup_create(void)
+ioloop_wakeup_create_(const char *file, int line)
 {
     wakeup_t *ret = calloc(1, sizeof(*ret));
     if (ret) {
-        RETAIN_HERE(ret);
+        RETAIN(ret);
     }
     return ret;
 }
@@ -269,7 +264,15 @@ ioloop_wakeup_create(void)
 bool
 ioloop_add_wake_event(wakeup_t *wakeup, void *context, wakeup_callback_t callback, wakeup_callback_t finalize, int milliseconds)
 {
-    INFO("ioloop_add_wake_event: %p %p %d", wakeup, context, milliseconds);
+    if (callback == NULL) {
+        ERROR("ioloop_add_wake_event called with null callback");
+        return false;
+    }
+    if (milliseconds < 0) {
+        ERROR("ioloop_add_wake_event called with negative timeout");
+        return false;
+    }
+    INFO("%p %p %d", wakeup, context, milliseconds);
     add_remove_wakeup(wakeup, false);
     wakeup->wakeup_time = ioloop_timenow() + milliseconds;
     wakeup->finalize = finalize;
@@ -375,6 +378,14 @@ start_over:
         }
     }
 
+    // Deliver and consume any asynchronous events
+    while (async_events != NULL) {
+        async_event_t *event = async_events;
+        async_events = event->next;
+        event->callback(event->context);
+        free(event);
+    }
+
     iop = &ios;
     while (*iop) {
         io = *iop;
@@ -430,6 +441,7 @@ start_over:
                 }
                 subproc->callback(subproc->context, status, NULL);
                 if (!WIFSTOPPED(status)) {
+                    subproc->finished = true;
                     RELEASE_HERE(subproc, subproc_finalize);
                     break;
                 }
@@ -467,9 +479,13 @@ start_over:
     for (io = ios; io; io = io->next) {
         if (io->fd != -1) {
             if (FD_ISSET(io->fd, &reads)) {
-                io->read_callback(io, io->context);
+                if (io->read_callback != NULL) {
+                    io->read_callback(io, io->context);
+                }
             } else if (FD_ISSET(io->fd, &writes)) {
-                io->write_callback(io, io->context);
+                if (io->write_callback != NULL) {
+                    io->write_callback(io, io->context);
+                }
             }
         }
     }
@@ -517,7 +533,7 @@ ioloop(void)
     int nev;
     do {
         nev = ioloop_events(0);
-        INFO("ioloop_events: %d", nev);
+        INFO("%d", nev);
     } while (nev >= 0);
     ERROR("ioloop returned %d.", nev);
     return -1;
@@ -551,7 +567,7 @@ udp_read_callback(io_t *io, void *context)
         ERROR("udp_read_callback: %s", strerror(errno));
         return;
     }
-    message = message_create(rv);
+    message = ioloop_message_create(rv);
     if (!message) {
         ERROR("udp_read_callback: out of memory");
         return;
@@ -647,6 +663,9 @@ tcp_read_callback(io_t *io, void *context)
             ERROR("tcp_read_callback: remote end (%s) closed connection on %d", connection->name, connection->io.fd);
             close(connection->io.fd);
             connection->io.fd = -1;
+            if (connection->disconnected) {
+                connection->disconnected(connection, connection->context, 0);
+            }
             // connection->io.finalize() will be called from the io loop.
             return;
         }
@@ -658,7 +677,7 @@ tcp_read_callback(io_t *io, void *context)
                                           ((uint16_t)connection->message_length_bytes[1]));
 
             if (connection->message == NULL) {
-                connection->message = message_create(connection->message_length);
+                connection->message = ioloop_message_create(connection->message_length);
                 if (!connection->message) {
                     ERROR("udp_read_callback: out of memory");
                     return;
@@ -672,7 +691,7 @@ tcp_read_callback(io_t *io, void *context)
         connection->message_cur += rv;
         if (connection->message_cur == connection->message_length) {
             connection->message_cur = 0;
-            connection->datagram_callback(connection, connection->message, connection->io.context);
+            connection->datagram_callback(connection, connection->message, connection->context);
             // The callback may retain the message; we need to make way for the next one.
             RELEASE_HERE(connection->message, message_finalize);
             connection->message = NULL;
@@ -899,6 +918,25 @@ ioloop_comm_cancel(comm_t *comm)
 }
 
 void
+ioloop_comm_context_set(comm_t *comm, void *context, finalize_callback_t callback)
+{
+    comm->finalize = callback;
+    comm->context = context;
+}
+
+void
+ioloop_comm_connect_callback_set(comm_t *comm, connect_callback_t callback)
+{
+    comm->connected = callback;
+}
+
+void
+ioloop_comm_disconnect_callback_set(comm_t *comm, disconnect_callback_t callback)
+{
+    comm->disconnected = callback;
+}
+
+void
 ioloop_listener_retain_(comm_t *listener, const char *file, int line)
 {
     RETAIN(&listener->io);
@@ -991,7 +1029,8 @@ comm_t *
 ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avoid_ports,
                        const addr_t *ip_address, const char *multicast, const char *name,
                        datagram_callback_t datagram_callback, connect_callback_t connected, cancel_callback_t cancel,
-                       ready_callback_t ready, finalize_callback_t finalize, void *context)
+                       ready_callback_t ready, finalize_callback_t finalize, tls_config_callback_t tls_config,
+                       void *context)
 {
     comm_t *listener;
     socklen_t sl;
@@ -1188,6 +1227,7 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
         }
         listener->finalize = finalize;
         ioloop_add_reader(&listener->io, listen_callback);
+        listener->tcp_stream = true;
     } else {
         rv = setsockopt(listener->io.fd, family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6,
                         family == AF_INET ? IP_PKTINFO : IPV6_RECVPKTINFO, &true_flag, sizeof true_flag);
@@ -1203,6 +1243,7 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
     listener->context = context;
     listener->ready = ready;
     listener->io.ready = listener_ready_callback;
+    listener->is_listener = true;
     return listener;
 }
 
@@ -1213,13 +1254,18 @@ connect_callback(io_t *io, void *context)
     int result;
     socklen_t len = sizeof result;
     comm_t *connection = (comm_t *)io;
+    bool getsockopt_failed = false;
     (void)context;
 
     // If connect failed, indicate that it failed.
     if (getsockopt(io->fd, SOL_SOCKET, SO_ERROR, &result, &len) < 0) {
-        ERROR("connect_callback: unable to get connect error: socket %d: Error %d (%s)",
+        result = errno;
+        getsockopt_failed = true;
+    }
+    if (result != 0) {
+        ERROR("connect_callback: %ssocket %d: Error %d (%s)", getsockopt_failed ? "getsockopt " : "",
               io->fd, result, strerror(result));
-        connection->disconnected(connection, result);
+        connection->disconnected(connection, connection->context, result);
         ioloop_comm_cancel(connection);
         return;
     }
@@ -1227,23 +1273,30 @@ connect_callback(io_t *io, void *context)
     // If this is a TLS connection, set up TLS.
     if (connection->tls_context == (tls_context_t *)-1) {
 #ifndef EXCLUDE_TLS
-        srp_tls_connect_callback(connection);
+        if (!srp_tls_connect_callback(connection)) {
+            connection->disconnected(connection, connection->context, 0);
+            ioloop_comm_cancel(connection);
+            return;
+        }
 #else
         ERROR("connect_callback: tls_context triggered with TLS excluded.");
-        connection->disconnected(connection, 0);
+        connection->disconnected(connection, connection->context, 0);
         ioloop_comm_cancel(connection);
         return;
 #endif
     }
 
-    connection->connected(connection, connection->context);
+    // We don't want to say we're connected until the TLS handshake is complete.
+    if (!connection->tls_handshake_incomplete) {
+        connection->connected(connection, connection->context);
+    }
     drop_writer(&connection->io);
     ioloop_add_reader(&connection->io, tcp_read_callback);
 }
 
 // Currently we don't do DNS lookups, despite the host identifier being an IP address.
 comm_t *NULLABLE
-ioloop_connection_create(addr_t *remote_address, bool tls, bool stream,
+ioloop_connection_create(addr_t *remote_address, bool tls, bool stream, bool stable, bool opportunistic,
                          datagram_callback_t datagram_callback, connect_callback_t connected,
                          disconnect_callback_t disconnected, finalize_callback_t finalize,
                          void * context)
@@ -1297,6 +1350,31 @@ ioloop_connection_create(addr_t *remote_address, bool tls, bool stream,
         RELEASE_HERE(&connection->io, comm_finalize);
         return NULL;
     }
+    // If a stable address has been requested, request a public address in source address selection.
+    if (stable && remote_address->sa.sa_family == AF_INET6) {
+// Linux doesn't currently follow RFC5014. These values are defined in linux/in6.h, but this can't be
+// safely included because it's incompatible with netinet/in.h. So until this is fixed, these values
+// are just copied out of the header; when it is fixed, the #if condition will evaluate to false.
+#if defined(LINUX)
+#  if !defined(IPV6_PREFER_SRC_PUBLIC)
+#    define IPV6_PREFER_SRC_TMP            0x0001
+#    define IPV6_PREFER_SRC_PUBLIC         0x0002
+#    define IPV6_PREFER_SRC_PUBTMP_DEFAULT 0x0100
+#  endif
+        int value = IPV6_PREFER_SRC_PUBLIC;
+        if (setsockopt(connection->io.fd, IPPROTO_IPV6, IPV6_ADDR_PREFERENCES, &value, sizeof(value)) < 0) {
+            ERROR("unable to request stable (public) address: %s", strerror(errno));
+            return NULL;
+        }
+#else // Assume BSD
+// BSD doesn't follow RFC5014 either (at least xnu).
+        int value = 0;
+        if (setsockopt(connection->io.fd, IPPROTO_IPV6, IPV6_PREFER_TEMPADDR, &value, sizeof(value)) < 0) {
+            ERROR("unable to request stable (public) address.");
+            return NULL;
+        }
+#endif // LINUX
+    }
 #ifdef NOT_HAVE_SA_LEN
     sl = (remote_address->sa.sa_family == AF_INET
           ? sizeof remote_address->sin
@@ -1332,10 +1410,13 @@ ioloop_connection_create(addr_t *remote_address, bool tls, bool stream,
     connection->datagram_callback = datagram_callback;
     connection->context = context;
     connection->finalize = finalize;
+    connection->opportunistic = opportunistic;
     if (!stream) {
         connection->is_connected = true;
+        connection->tcp_stream = false;
         ioloop_add_reader(&connection->io, udp_read_callback);
     } else {
+        connection->tcp_stream = true;
         ioloop_add_writer(&connection->io, connect_callback);
     }
 
@@ -1472,19 +1553,38 @@ ioloop_subproc(const char *exepath, char **argv, int argc, subproc_callback_t ca
     return subproc;
 }
 
+void
+ioloop_subproc_run_sync(subproc_t *subproc)
+{
+    int nev;
+    RETAIN_HERE(subproc);
+    do {
+        nev = ioloop_events(0);
+        INFO("%d events", nev);
+        if (subproc->finished) {
+            RELEASE_HERE(subproc, subproc_finalize);
+            return;
+        }
+    } while (nev >= 0);
+    ERROR("ioloop returned %d.", nev);
+}
+
 #ifndef EXCLUDE_DNSSD_TXN_SUPPORT
 static void
 dnssd_txn_callback(io_t *io, void *context)
 {
     dnssd_txn_t *txn = (dnssd_txn_t *)context;
-    int status = DNSServiceProcessResult(txn->sdref);
-    if (status != kDNSServiceErr_NoError) {
-        if (txn->failure_callback != NULL) {
-            txn->failure_callback(txn->context, status);
-        } else {
-            INFO("dnssd_txn_callback: status %d", status);
+    // It's only safe to process the I/O if the DNSServiceRef hasn't been deallocated.
+    if (txn->sdref != NULL) {
+        int status = DNSServiceProcessResult(txn->sdref);
+        if (status != kDNSServiceErr_NoError) {
+            if (txn->failure_callback != NULL) {
+                txn->failure_callback(txn->context, status);
+            } else {
+                INFO("status %d", status);
+            }
+            ioloop_dnssd_txn_cancel(txn);
         }
-        ioloop_dnssd_txn_cancel(txn);
     }
 }
 
@@ -1514,7 +1614,7 @@ ioloop_dnssd_txn_cancel(dnssd_txn_t *txn)
         DNSServiceRefDeallocate(txn->sdref);
         txn->sdref = NULL;
     } else {
-        INFO("ioloop_dnssd_txn_cancel: dead transaction.");
+        INFO("dead transaction.");
     }
     if (txn->io != NULL) {
         txn->io->fd = -1;
@@ -1619,6 +1719,25 @@ ioloop_file_descriptor_create_(int fd, void *context, finalize_callback_t finali
         RETAIN(ret);
     }
     return ret;
+}
+
+void
+ioloop_run_async(async_callback_t callback, void *context)
+{
+    async_event_t **epp, *event = calloc(1, sizeof(*event));
+    if (event == NULL) {
+        ERROR("no memory for async callback to %p, context %p", callback, context);
+    }
+
+    event->callback = callback;
+    event->context = context;
+
+    epp = &async_events;
+    while (*epp) {
+        epp = &(*epp)->next;
+    }
+
+    *epp = event;
 }
 
 // Local Variables:

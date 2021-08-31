@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 1997-2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 1997-2004, 2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1497,7 +1497,7 @@ DEBUG_EXPORT size_t DebugSNPrintFVAList(char *sbuffer, size_t buflen, const char
  */
 
 #if ( DEBUG )
-DEBUG_EXPORT const char *   DebugGetErrorString( int_least32_t inErrorCode, char *inBuffer, size_t inBufferSize );
+DEBUG_EXPORT const char *   DebugGetErrorString( long inErrorCode, char *inBuffer, size_t inBufferSize );
 #endif
 
 //---------------------------------------------------------------------------------------------------------------------------

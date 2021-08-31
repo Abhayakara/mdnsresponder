@@ -6,7 +6,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -49,7 +49,6 @@ extern int daemon(int, int);
 #include "mDNSUNP.h"        // For daemon()
 #include "uds_daemon.h"
 #include "PlatformCommon.h"
-#include "posix_utilities.h"    // For getLocalTimestamp()
 
 #define CONFIG_FILE "/etc/mdnsd.conf"
 static domainname DynDNSZone;                // Default wide-area zone for service registration
@@ -122,18 +121,18 @@ mDNSlocal void ParseCmdLineArgs(int argc, char **argv)
 mDNSlocal void DumpStateLog()
 // Dump a little log of what we've been up to.
 {
-    char timestamp[64]; // 64 is enough to store the UTC timestmp
+    char timestamp[MIN_TIMESTAMP_STRING_LENGTH];
 
     mDNSu32 major_version = _DNS_SD_H / 10000;
     mDNSu32 minor_version1 = (_DNS_SD_H - major_version * 10000) / 100;
     mDNSu32 minor_version2 = _DNS_SD_H % 100;
 
-    getLocalTimestamp(timestamp, sizeof(timestamp));
+    getLocalTimestampNow(timestamp, sizeof(timestamp));
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "---- BEGIN STATE LOG ---- (%s mDNSResponder Build %d.%02d.%02d)", timestamp, major_version, minor_version1, minor_version2);
 
     udsserver_info_dump_to_fd(STDERR_FILENO);
 
-    getLocalTimestamp(timestamp, sizeof(timestamp));
+    getLocalTimestampNow(timestamp, sizeof(timestamp));
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "---- END STATE LOG ---- (%s mDNSResponder Build %d.%02d.%02d)", timestamp, major_version, minor_version1, minor_version2);
 }
 
@@ -244,7 +243,7 @@ mStatus udsSupportAddFDToEventLoop(int fd, udsEventCallback callback, void *cont
     return mDNSPosixAddFDToEventLoop(fd, callback, context);
 }
 
-int udsSupportReadFD(dnssd_sock_t fd, char *buf, int len, int flags, void *platform_data)
+ssize_t udsSupportReadFD(dnssd_sock_t fd, char *buf, mDNSu32 len, int flags, void *platform_data)
 {
     (void) platform_data;
     return recv(fd, buf, len, flags);

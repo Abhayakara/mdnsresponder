@@ -30,6 +30,7 @@ typedef enum
     dnssd_svcb_key_ech_config = 5,
     dnssd_svcb_key_ipv6_hint = 6,
     dnssd_svcb_key_doh_uri = 32768,
+	dnssd_svcb_key_odoh_config = 32769,
 } dnssd_svcb_key_t;
 
 typedef bool (^_dnssd_svcb_access_value_block_t)(const void *value, size_t value_size);
@@ -232,6 +233,7 @@ dnssd_svcb_is_valid(const uint8_t *buffer, size_t buffer_size)
 						case dnssd_svcb_key_ech_config:
 						case dnssd_svcb_key_ipv6_hint:
 						case dnssd_svcb_key_doh_uri:
+						case dnssd_svcb_key_odoh_config:
 							// Known keys are fine
 							break;
 						default:
@@ -290,6 +292,21 @@ dnssd_svcb_copy_ech_config(const uint8_t *buffer, size_t buffer_size, size_t *ou
 		return false;
 	});
 	return ech_config;
+}
+
+uint8_t *
+dnssd_svcb_copy_odoh_config(const uint8_t *buffer, size_t buffer_size, size_t *out_length)
+{
+	__block uint8_t *odoh_config = NULL;
+	(void)_dnssd_svcb_extract_values(buffer, buffer_size, dnssd_svcb_key_odoh_config, ^bool(const void *value, size_t value_size) {
+		if (value != NULL && value_size > 0) {
+			odoh_config = (uint8_t *)mdns_calloc(1, value_size);
+			*out_length = value_size;
+			memcpy(odoh_config, value, value_size);
+		}
+		return false;
+	});
+	return odoh_config;
 }
 
 void

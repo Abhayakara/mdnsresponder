@@ -30,12 +30,7 @@
 #include <string.h>
 
 #include "dns_sd.h"
-#if !defined(THREAD_DEVKIT_ADK)
 #include "mdns_strict.h"
-#else
-#define mdns_malloc malloc
-#define mdns_free(x) do { if ((x) != NULL) { free(x); (x) = NULL; } } while (0)
-#endif // THREAD_DEVKIT_ADK
 
 #if defined(_WIN32)
 // disable warning "conversion from <data> to uint16_t"
@@ -373,7 +368,11 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
 
 // NOT static -- otherwise the compiler may optimize it out
 // The "@(#) " pattern is a special prefix the "what" command looks for
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdate-time"
+#endif
 const char VersionString_SCCS_libdnssd[] DNSSD_USED = "@(#) libdns_sd " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
+#if defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
