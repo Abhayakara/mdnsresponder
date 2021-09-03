@@ -409,7 +409,8 @@ usage(void)
     fprintf(stderr,
             "srp-client [--lease-time <seconds>] [--client-count <client count>] [--server <address>%%<port>]\n"
             "           [--random-leases] [--delete-registrations] [--use-thread-services] [--log-stderr]\n"
-            "           [--interface <interface name>] [--bogusify-signatures] [--dup-instance-name]\n");
+            "           [--interface <interface name>] [--bogusify-signatures] [--dup-instance-name]\n"
+            "           [--service-port <port number>]\n");
     exit(1);
 }
 
@@ -444,8 +445,6 @@ main(int argc, char **argv)
     uint8_t server_address[16] = { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 };
     uint8_t bogus_address[16] = { 0xfc,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 };
         // { 0x26, 0x20, 0x01, 0x49, 0x00, 0x0f, 0x1a, 0x4d, 0x04, 0xff, 0x61, 0x5a, 0xa2, 0x2a, 0xab, 0xe8 };
-    uint8_t port[2];
-    uint16_t iport;
     int err;
     DNSServiceRef sdref;
     int *nump;
@@ -457,6 +456,7 @@ main(int argc, char **argv)
     bool log_stderr = false;
     char instance_name[128];
     const char *service_type = "_ipps._tcp";
+    uint16_t service_port = 0;
 
     ioloop_init();
 
@@ -483,7 +483,6 @@ main(int argc, char **argv)
             i++;
         } else if (!strcmp(argv[i], "--server")) {
             char *percent;
-            int server_port;
             uint8_t addrbuf[16];
             uint16_t addrtype = dns_rrtype_aaaa;
             int addrlen = 16;
@@ -498,12 +497,13 @@ main(int argc, char **argv)
             *percent = 0;
             percent++;
 
-            server_port = (uint32_t)strtoul(percent, &end, 10);
-            if (end == percent || end[0] != 0) {
+            const unsigned long in_server_port = strtoul(percent, &end, 10);
+            if (in_server_port > UINT16_MAX || end == percent || end[0] != 0) {
                 usage();
             }
-            port[0] = server_port >> 8;
-            port[1] = server_port & 255;
+            uint8_t server_port[2];
+            server_port[0] = ((uint16_t)in_server_port) >> 8;
+            server_port[1] = ((uint16_t)in_server_port) & 255;
 
             if (inet_pton(AF_INET6, argv[i + 1], addrbuf) < 1) {
                 if (inet_pton(AF_INET, argv[i + 1], addrbuf) < 1) {
@@ -513,7 +513,7 @@ main(int argc, char **argv)
                     addrlen = 4;
                 }
             }
-            srp_add_server_address(port, addrtype, addrbuf, addrlen);
+            srp_add_server_address(server_port, addrtype, addrbuf, addrlen);
             have_server_address = true;
             i++;
         } else if (!strcmp(argv[i], "--random-leases")) {
@@ -537,6 +537,20 @@ main(int argc, char **argv)
             }
             service_type = argv[i + 1];
             i++;
+        } else if (!strcmp(argv[i], "--service-port")) {
+            if (i + 1 == argc) {
+                usage();
+            }
+
+            const int in_service_port = atoi(argv[i + 1]);
+            if (in_service_port == 0 || in_service_port > UINT16_MAX) {
+                fprintf(stderr, "Service port number %d is out of range or invalid, should be in (0, 65535].\n",
+                        in_service_port);
+                usage();
+            }
+
+            service_port = (uint16_t)in_service_port;
+            i++;
         } else {
             usage();
         }
@@ -551,10 +565,9 @@ main(int argc, char **argv)
     }
 
     if (!have_server_address && !use_thread_services) {
-        port[0] = 0;
-        port[1] = 53;
-        srp_add_server_address(port, dns_rrtype_aaaa, bogus_address, 16);
-        srp_add_server_address(port, dns_rrtype_aaaa, server_address, 16);
+        const uint8_t server_port[2] = {0, 53};
+        srp_add_server_address(server_port, dns_rrtype_aaaa, bogus_address, 16);
+        srp_add_server_address(server_port, dns_rrtype_aaaa, server_address, 16);
     }
 
     if (dup_instance_name) {
@@ -606,10 +619,15 @@ main(int argc, char **argv)
             txt_data = TXTRecordGetBytesPtr(&txt);
             txt_len = TXTRecordGetLength(&txt);
         }
-        iport = (port[0] << 8) + port[1];
+
+        if (service_port == 0) {
+            // If no service port is specified (0 indicates that port is unspecified), the index i will be used to
+            // generate the port number.
+            service_port = (i % UINT16_MAX) == 0 ? 1 : (i % UINT16_MAX);
+        }
 
         err = DNSServiceRegister(&sdref, 0, 0, dup_instance_name ? instance_name : hnbuf, service_type,
-                                 0, 0, iport, txt_len, txt_data, register_callback, client);
+                                 0, 0, htons(service_port), txt_len, txt_data, register_callback, client);
         if (err != kDNSServiceErr_NoError) {
             ERROR("DNSServiceRegister failed: %d", err);
             exit(1);

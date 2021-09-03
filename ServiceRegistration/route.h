@@ -227,6 +227,8 @@ struct icmp_message {
     int hop_limit;                  // Hop limit provided by the kernel, must be 255.
 };
 
+extern struct in6_addr ula_prefix;
+
 void ula_generate(void);
 bool start_route_listener(void);
 bool start_icmp_listener(void);

@@ -660,7 +660,7 @@ interface_beacon(void *context)
 #else
          partition_can_provide_routing ? " canpr" : " !canpr",
 #endif
-         interface->advertise_ipv6_prefix ? " pio" : " !pio",
+         interface->advertise_ipv6_prefix ? " advert" : " !advert",
          interface->sent_first_beacon ? "" : " first beacon");
 
     if (interface->deprecate_deadline > now) {
@@ -693,7 +693,7 @@ interface_beacon(void *context)
 #ifndef RA_TESTER
     } else {
         INFO("Didn't send: %s %s", partition_can_provide_routing ? "canpr" : "can'tpr",
-             interface->advertise_ipv6_prefix ? "adv6" : "!adv6");
+             interface->advertise_ipv6_prefix ? "advert" : "!advert");
     }
 #endif
     if (interface->num_beacons_sent < 3) {
@@ -1101,8 +1101,12 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
     // an advertisement for an on-link prefix before interface configuration completes. When this happens, we
     // need to delete the address we just configured, because we're not going to be advertising it. We always
     // get a policy re-evaluation event when interface configuration completes, so this will happen immediately.
+    // At this point we have not yet sent a router advertisement with the prefix, so even though it has a preferred
+    // lifetime of about 1800 seconds here, we can safely set it to zero without leaving stale information
+    // in any host's routing table.
     if (!interface->advertise_ipv6_prefix && interface->on_link_prefix_configured) {
         INFO("on-link prefix appeared during interface configuration. removing");
+        interface->preferred_lifetime = 0;
         interface_prefix_deconfigure(interface);
     }
 

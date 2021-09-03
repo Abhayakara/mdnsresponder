@@ -1189,6 +1189,9 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
                 break;
             }
         }
+        if (have_good_address) {
+            break;
+        }
     }
 
     //  * Exactly one KEY RR:

@@ -58,7 +58,7 @@ struct adv_host {
     int ref_count;
     wakeup_t *NONNULL retry_wakeup;        // Wakeup for retry when we run into a temporary failure
     wakeup_t *NONNULL lease_wakeup;        // Wakeup at least expiry time
-    service_connection_t *NULLABLE conn; // // The connection handler to mDNSResponder that shares DNSServiceRef with others.
+    service_connection_t *NULLABLE conn;   // Connection handler to mDNSResponder that shares DNSServiceRef with others.
     adv_host_t *NULLABLE next;             // Hosts are maintained in a linked list.
     adv_update_t *NULLABLE updates;        // Updates to this host, if any
     client_update_t *NULLABLE clients;     // Updates that clients have sent for which replies have not yet been sent.
@@ -77,6 +77,7 @@ struct adv_host {
                                            // died.
     time_t update_time;                    // Time when the update completed.
     uint64_t update_server_id;             // Server ID from server that sent the update
+    uint64_t server_stable_id;             // Stable ID of server that got update from client (we're using server ULA).
     uint16_t key_rdlen;                    // Length of key
     uint8_t *NULLABLE key_rdata;           // Raw KEY rdata, suitable for DNSServiceRegisterRecord().
     uint32_t lease_interval;               // Interval for address lease

@@ -894,6 +894,10 @@ srpl_host_message_send(srpl_connection_t *srpl_connection, adv_host_t *host)
     dns_rdlength_begin(&towire);
     dns_u32_to_wire(&towire, (uint32_t)(time(NULL) - host->update_time));
     dns_rdlength_end(&towire);
+    dns_u16_to_wire(&towire, kDSOType_SRPLServerStableID);
+    dns_rdlength_begin(&towire);
+    dns_u64_to_wire(&towire, host->server_stable_id);
+    dns_rdlength_end(&towire);
     dns_u16_to_wire(&towire, kDSOType_SRPLHostMessage);
     dns_u16_to_wire(&towire, host->message->length);
     if (towire.error) {
@@ -1245,6 +1249,8 @@ srpl_host_message_parse_in(int index, const uint8_t *buffer, unsigned *offp, uin
         memcpy(&update->message->wire, buffer, length);
         *offp = length;
         return true;
+    case 3:
+        return dns_u64_parse(buffer, length, offp, &update->server_stable_id);
     }
     return false;
 }
@@ -1257,17 +1263,17 @@ srpl_host_message(srpl_connection_t *srpl_connection, message_t *message, dso_st
               srpl_connection->name, dso->primary.length);
         goto fail;
     } else {
-        const char *names[3] = { "Host Name", "Time Offset", "Host Message" };
-        dso_message_types_t additionals[3] = { kDSOType_SRPLHostname, kDSOType_SRPLTimeOffset, kDSOType_SRPLHostMessage };
-        bool required[3] = { true, true, true };
-        int indices[3];
+        const char *names[4] = { "Host Name", "Time Offset", "Host Message", "Server Stable ID" };
+        dso_message_types_t additionals[4] = { kDSOType_SRPLHostname, kDSOType_SRPLTimeOffset, kDSOType_SRPLHostMessage, kDSOType_SRPLServerStableID };
+        bool required[4] = { true, true, true, false };
+        int indices[4];
         srpl_event_t event;
 
         // Parse host message
         srpl_event_initialize(&event, srpl_event_host_message_received);
         srpl_event_content_type_set(&event, srpl_event_content_type_host_update);
         if (!srpl_find_dso_additionals(srpl_connection, dso, additionals,
-                                       required, names, indices, 3, 3, 3, "SRPLHost message",
+                                       required, names, indices, 4, 3, 4, "SRPLHost message",
                                        &event.content.host_update, srpl_host_message_parse_in)) {
             goto fail;
         }

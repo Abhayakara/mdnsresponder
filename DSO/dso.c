@@ -739,7 +739,8 @@ void dso_message_received(dso_state_t *dso, const uint8_t *message, size_t messa
         // This is fatal because we've received a response to a message we didn't send, so
         // it's not just that we don't understand what was sent.
         if (!expected) {
-            LogMsg("dso_message_received: fatal: %s sent %ld byte message, QR=1", dso->remote_name, (long)message_length);
+            LogMsg("dso_message_received: fatal: %s sent %ld byte message, QR=1, xid=%02x%02x", dso->remote_name,
+                   (long)message_length, header->id.b[0], header->id.b[1]);
             dso_state_cancel(dso);
             goto out;
         }

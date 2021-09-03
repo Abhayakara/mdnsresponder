@@ -33,9 +33,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/signal.h>
-#ifndef LINUX
-#include <sys/ucred.h>
-#endif
 
 #ifdef OPENTHREAD_PLATFORM_POSIX
 #include "cti-server.h"
@@ -527,7 +524,7 @@ cti_accept(int listen_fd, uid_t *p_uid, gid_t *p_gid, pid_t *p_pid)
     struct sockaddr_un addr;
     socklen_t socksize = sizeof(addr);
     int fd = accept(listen_fd, (struct sockaddr *)&addr, &socksize);
-#ifdef LINUX
+#if defined(LINUX) || OPENTHREAD_PLATFORM_POSIX
     size_t len;
     struct ucred ucred;
 #endif
@@ -537,7 +534,7 @@ cti_accept(int listen_fd, uid_t *p_uid, gid_t *p_gid, pid_t *p_pid)
         return -1;
     }
 
-#ifdef LINUX
+#if defined(LINUX) || OPENTHREAD_PLATFORM_POSIX
     len = sizeof(struct ucred);
     if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &ucred, &len) < 0) {
         syslog(LOG_ERR, "cti_accept: unable to get peer credentials for incoming connection: %s", strerror(errno));
@@ -587,7 +584,7 @@ cti_accept(int listen_fd, uid_t *p_uid, gid_t *p_gid, pid_t *p_pid)
         goto out;
     }
 
-#ifdef LINUX
+#if defined(LINUX) || OPENTHREAD_PLATFORM_POSIX
     if (p_uid != NULL) {
         *p_uid = ucred.uid;
     }

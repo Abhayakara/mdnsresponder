@@ -209,6 +209,7 @@ srp_replication_advertise_finished(adv_host_t *host, void *context, comm_t *conn
                 if (host->srpl_connection != NULL) {
                     if (rcode == dns_rcode_noerror) {
                         host->update_server_id = host->srpl_connection->remote_server_id;
+                        host->server_stable_id = host->srpl_connection->stashed_host.server_stable_id;
                     }
 
                     // This is the safest place to clear this pointer--we do not want the srpl_connection pointer to not
@@ -222,6 +223,7 @@ srp_replication_advertise_finished(adv_host_t *host, void *context, comm_t *conn
         }
 
         if (host != NULL) {
+            memcpy(&host->server_stable_id, &ula_prefix, sizeof(host->server_stable_id));
             srpl_srp_client_update_finished_event_send(host, rcode);
             host->update_server_id = 0;
         }

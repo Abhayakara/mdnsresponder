@@ -67,6 +67,7 @@ typedef enum {
     kDSOType_SRPLHostMessage = 0xF915,
     kDSOType_SRPLTimeOffset = 0xF916,
     kDSOType_SRPLKeyID = 0xF917,
+    kDSOType_SRPLServerStableID = 0xF918,
 } dso_message_types_t;
 
 // When a DSO message arrives, or one that was sent is acknowledged, or the state of the DSO connection

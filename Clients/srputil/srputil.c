@@ -135,6 +135,7 @@ services_callback(advertising_proxy_conn_ref cref, void *result, advertising_pro
     advertising_proxy_host_t *host = result;
     const char *address;
     char addrbuf[INET6_ADDRSTRLEN];
+    uint64_t ula;
 
     if (err != kDNSSDAdvertisingProxyStatus_NoError) {
         INFO("services: cref %p  response %p   err %d.", cref, result, err);
@@ -177,9 +178,15 @@ services_callback(advertising_proxy_conn_ref cref, void *result, advertising_pro
         seconds = lease / 1000;
         lease -= seconds * 1000;
 
-        printf("\"%s\" \"%s\" %s %s %s %qd:%qd:%qd.%qd \"%s\" %s %" PRIu64 "\n", host->regname, instance_name, service_type, port,
+        // Our implementation of the stable server ID uses the server ULA, so just copy out those 40 bits,
+        // which are in network byte order.
+        ula = 0;
+        for (int j = 1; j < 6; j++) {
+            ula = ula << 8 | (((uint8_t *)&host->server_id)[j]);
+        }
+        printf("\"%s\" \"%s\" %s %s %s %qd:%qd:%qd.%qd \"%s\" %s %" PRIx64 "\n", host->regname, instance_name, service_type, port,
                address == NULL ? "" : address, hours, minutes, seconds, lease, host->hostname, host->removed ? "invalid" : "valid",
-               host->server_id);
+               ula);
     }
     // In case there's more than one address...
     for (i = 1; i < host->num_addresses; i++) {

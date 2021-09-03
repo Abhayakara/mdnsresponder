@@ -198,6 +198,7 @@ struct srpl_srp_client_update_result {
 
 struct srpl_host_update {
     message_t *NULLABLE message;
+    uint64_t server_stable_id;
     uint32_t update_offset;
     time_t update_time;
     dns_name_t *NULLABLE hostname;

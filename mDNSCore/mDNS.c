@@ -4326,8 +4326,8 @@ mDNSexport void AnswerCurrentQuestionWithResourceRecord(mDNS *const m, CacheReco
     {
         mDNSBool skipUpdate = mDNSfalse;
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
-        mdns_resolver_type_t resolver_type = mdns_dns_service_get_resolver_type(q->dnsservice);
-        if (!q->dnsservice || (resolver_type == mdns_resolver_type_null))
+        mdns_resolver_type_t resolver_type = (!q->dnsservice) ? mdns_resolver_type_null : mdns_dns_service_get_resolver_type(q->dnsservice);
+        if (resolver_type == mdns_resolver_type_null)
         {
             skipUpdate = mDNStrue;
         }
