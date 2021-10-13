@@ -75,9 +75,7 @@ extern char *win32_strerror(int inErrorCode);
 #if defined(USE_TCP_LOOPBACK)
 #   define AF_DNSSD             AF_INET
 #   define MDNS_TCP_SERVERADDR  "127.0.0.1"
-#ifdef WIN32_CENTENNIAL
 #   define MDNS_TCP_SERVERPORT_CENTENNIAL  53545
-#endif
 #   define MDNS_TCP_SERVERPORT  5354
 #   define LISTENQ              5
 #   define dnssd_sockaddr_t     struct sockaddr_in
