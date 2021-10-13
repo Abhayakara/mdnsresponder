@@ -15338,6 +15338,9 @@ mDNSexport void mDNS_StartExit(mDNS *const m)
             rr->resrec.RecordType, ARDisplayString(m, rr));
     }
 
+    // Send responses to flush any pending deregistrations
+    SendResponses(m);
+
     // If any deregistering records remain, send their deregistration announcements before we exit
     if (m->mDNSPlatformStatus != mStatus_NoError) DiscardDeregistrations(m);
 
