@@ -1487,7 +1487,7 @@ mDNSlocal int SetupInterfaceList(mDNS *const m)
                         firstLoopbackIndex = ifIndex;
                     }
                 }
-                else
+                else if (i->ifa_flags & (IFF_MULTICAST | IFF_BROADCAST))
                 {
                     const int ethernet_addr_len = 6;
                     uint8_t hwaddr[ethernet_addr_len];
