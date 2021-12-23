@@ -109,8 +109,10 @@ mDNSlocal void ParseCmdLineArgs(int argc, char **argv)
     }
     if (!mDNS_DebugMode)
     {
+#ifndef __ANDROID__
         int result = daemon(0, 0);
         if (result != 0) { LogMsg("Could not run as daemon - exiting"); exit(result); }
+#endif
 #if __APPLE__
         LogMsg("The POSIX mdnsd should only be used on OS X for testing - exiting");
         exit(-1);
