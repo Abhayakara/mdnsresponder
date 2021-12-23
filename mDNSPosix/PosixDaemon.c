@@ -50,6 +50,10 @@ extern int daemon(int, int);
 #include "uds_daemon.h"
 #include "PlatformCommon.h"
 
+#ifndef MDNS_USERNAME
+#define MDNS_USERNAME "nobody"
+#endif
+
 #define CONFIG_FILE "/etc/mdnsd.conf"
 static domainname DynDNSZone;                // Default wide-area zone for service registration
 static domainname DynDNSHostname;
@@ -197,13 +201,14 @@ int main(int argc, char **argv)
     // Now that we're finished with anything privileged, switch over to running as "nobody"
     if (mStatus_NoError == err)
     {
-        const struct passwd *pw = getpwnam("nobody");
+        const struct passwd *pw = getpwnam(MDNS_USERNAME);
         if (pw != NULL)
         {
             if (setgid(pw->pw_gid) < 0)
             {
                 LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
-                          "WARNING: mdnsd continuing as group root because setgid to \"nobody\" failed with " PUB_S, strerror(errno));
+                          "WARNING: mdnsd continuing as group root because setgid to \""
+                          MDNS_USERNAME "\" failed with " PUB_S, strerror(errno));
             }
             if (setuid(pw->pw_uid) < 0)
             {
