@@ -212,6 +212,11 @@ mDNSlocal void RegCallback(mDNS *const m, ServiceRecordSet *const sr, mStatus re
     else if (result == mStatus_NameConflict)
     {
         if (x->autoname) mDNS_RenameAndReregisterService(m, sr, mDNSNULL);
+        else if (x->autorename)
+        {
+            IncrementLabelSuffix(&x->name, mDNStrue);
+            mDNS_RenameAndReregisterService(m, &x->s, &x->name);
+        }
         else if (x->callback)
             x->callback((DNSServiceRef)x, 0, result, namestr, typestr, domstr, x->context);
     }
@@ -277,7 +282,7 @@ DNSServiceErrorType DNSServiceRegister
     x->callback  = callback;
     x->context   = context;
     x->autoname = (!name[0]);
-    x->autorename = mDNSfalse;
+    x->autorename = !(flags & kDNSServiceFlagsNoAutoRename);
     x->name = n;
     x->host = h;
 
